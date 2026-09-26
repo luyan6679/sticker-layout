@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>A4 贴纸自动排版器 V1.5</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>A4 贴纸自动排版器 <span class="version">V1.5</span></h1>
+      <p>手机适配版：保留桌面全部功能，并针对触屏、窄屏和多选操作优化。</p>
+    </div>
+    <div class="top-actions">
+      <button id="saveProjectBtn" class="btn secondary">保存项目</button>
+      <button id="exportProjectBtn" class="btn secondary">导出项目</button>
+      <button id="importProjectBtn" class="btn secondary">导入项目</button>
+      <button id="printBtn" class="btn primary">打印 / 保存 PDF</button>
+      <input id="projectFileInput" type="file" accept=".stickerproj,.json" hidden />
+    </div>
+  </header>
+
+  <main class="app-grid">
+    <aside class="panel left-panel">
+      <section>
+        <div class="section-title-row">
+          <h2>图片素材</h2>
+          <label class="btn small primary file-button">
+            + 添加图片
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
+          </label>
+        </div>
+        <div id="emptyHint" class="empty-hint">
+          还没有图片。点击“添加图片”，可一次选择数百张；系统会逐张压缩为打印工作图。
+        </div>
+        <div id="assetList" class="asset-list"></div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="workspace-toolbar">
+        <div>
+          <strong id="pageSummary">0 张贴纸 · 0 页</strong>
+          <span id="layoutWarning" class="warning"></span>
+        </div>
+        <div id="pageNav" class="page-nav hidden">
+          <button id="prevPageBtn" class="btn secondary small">上一页</button>
+          <select id="pageSelect" aria-label="页码"></select>
+          <button id="nextPageBtn" class="btn secondary small">下一页</button>
+        </div>
+        <div class="toolbar-actions">
+          <button id="mobileMultiSelectBtn" class="btn secondary mobile-only" type="button" aria-pressed="false">多选模式</button>
+          <button id="autoLayoutBtn" class="btn secondary">重新自动排版</button>
+          <button id="loadProjectBtn" class="btn secondary">恢复最近保存</button>
+        </div>
+      </div>
+
+      <div id="selectionToolbar" class="selection-toolbar hidden">
+        <div class="selection-status">
+          已选 <strong id="selectionCount">0</strong> 个图片素材
+        </div>
+
+        <div class="selection-group">
+          <button id="selectPageBtn" class="btn secondary small">全选本页</button>
+          <button id="clearSelectionBtn" class="btn secondary small">取消选择</button>
+        </div>
+
+        <div class="selection-divider"></div>
+
+        <div class="selection-group quick-size-group">
+          <span class="selection-label">快捷长边</span>
+          <button class="quick-size-btn" data-mm="30">30 mm</button>
+          <button class="quick-size-btn" data-mm="40">40 mm</button>
+          <button class="quick-size-btn" data-mm="50">50 mm</button>
+          <button class="quick-size-btn" data-mm="60">60 mm</button>
+          <button class="quick-size-btn" data-mm="70">70 mm</button>
+        </div>
+
+        <div class="selection-group custom-size-group">
+          <label>
+            <span>自定义长边</span>
+            <input id="selectedLongEdgeInput" type="number" min="5" max="280" step="0.5" value="50" />
+          </label>
+          <button id="applySelectedSizeBtn" class="btn secondary small">应用</button>
+        </div>
+
+        <div class="selection-group scale-group">
+          <span class="selection-label">比例微调</span>
+          <button class="scale-selected-btn" data-scale="0.9">−10%</button>
+          <button class="scale-selected-btn" data-scale="1.1">+10%</button>
+        </div>
+
+        <div class="selection-hint">
+          普通点击单选；Ctrl / ⌘ 点击追加；Shift 点击连续选择。同一素材有多个副本时会一起调整。
+        </div>
+      </div>
+
+      <div id="previewArea" class="preview-area">
+        <div class="preview-placeholder">
+          上传图片后，这里只显示当前 A4 页面；其他页通过页码切换。
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel right-panel">
+      <section>
+        <h2>纸张设置</h2>
+
+        <label class="field">
+          <span>纸张</span>
+          <select id="paperSize">
+            <option value="A4" selected>A4 · 210 × 297 mm</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>方向</span>
+          <select id="orientation">
+            <option value="portrait" selected>纵向</option>
+            <option value="landscape">横向</option>
+          </select>
+        </label>
+
+        <div class="field two-cols">
+          <label>
+            <span>页边距（mm）</span>
+            <input id="marginInput" type="number" min="0" max="30" step="0.5" value="8" />
+          </label>
+          <label>
+            <span>贴纸间距（mm）</span>
+            <input id="gapInput" type="number" min="0" max="30" step="0.5" value="3" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>自动排列方式</span>
+          <select id="layoutMode">
+            <option value="compact" selected>紧凑排列</option>
+            <option value="order">按上传顺序</option>
+          </select>
+        </label>
+      </section>
+
+      <section>
+        <h2>默认贴纸尺寸</h2>
+        <div class="preset-grid">
+          <button class="preset" data-w="30" data-h="30">30 × 30</button>
+          <button class="preset" data-w="40" data-h="40">40 × 40</button>
+          <button class="preset active" data-w="50" data-h="50">50 × 50</button>
+          <button class="preset" data-w="60" data-h="60">60 × 60</button>
+          <button class="preset" data-w="40" data-h="60">40 × 60</button>
+          <button class="preset" data-w="50" data-h="70">50 × 70</button>
+        </div>
+
+        <div class="field two-cols">
+          <label>
+            <span>宽（mm）</span>
+            <input id="defaultWidth" type="number" min="5" max="200" step="0.5" value="50" />
+          </label>
+          <label>
+            <span>高（mm）</span>
+            <input id="defaultHeight" type="number" min="5" max="280" step="0.5" value="50" />
+          </label>
+        </div>
+
+        <label class="check-row">
+          <input id="preserveAspectOnImport" type="checkbox" checked />
+          <span>导入时保持原图比例</span>
+        </label>
+      </section>
+
+      <section>
+        <h2>批量尺寸</h2>
+
+        <label class="field">
+          <span>统一尺寸方式</span>
+          <select id="batchSizingMode">
+            <option value="box" selected>适配默认尺寸框</option>
+            <option value="long">统一长边</option>
+            <option value="short">统一短边</option>
+          </select>
+        </label>
+
+        <label id="edgeSizeField" class="field hidden">
+          <span id="edgeSizeLabel">长边尺寸（mm）</span>
+          <input id="edgeSizeInput" type="number" min="5" max="280" step="0.5" value="50" />
+        </label>
+
+        <p id="batchSizingHint" class="helper-text">
+          按默认宽高尺寸框等比缩放，图片不会被拉伸或裁成正方形。
+        </p>
+
+        <button id="applySizeToAllBtn" class="btn secondary full">将尺寸规则应用到全部图片</button>
+      </section>
+
+      <section>
+        <h2>图片与裁切</h2>
+        <label class="field">
+          <span>图片适配方式</span>
+          <select id="fitMode">
+            <option value="contain" selected>完整显示（等比缩放）</option>
+            <option value="cover">填满裁切</option>
+            <option value="fill">拉伸填满</option>
+          </select>
+        </label>
+
+        <label class="check-row">
+          <input id="showBorder" type="checkbox" checked />
+          <span>显示贴纸边框</span>
+        </label>
+
+        <label class="check-row">
+          <input id="showCutMarks" type="checkbox" />
+          <span>显示裁切十字线</span>
+        </label>
+      </section>
+
+      <section class="print-note">
+        <h2>打印提醒</h2>
+        <p>请在系统打印窗口选择 <strong>100% / 实际大小</strong>，不要选择“适合页面”，否则实际尺寸可能被缩放。</p>
+      </section>
+    </aside>
+  </main>
+
+  <nav id="mobileNav" class="mobile-nav" aria-label="手机端页面导航">
+    <button type="button" class="mobile-nav-btn" data-mobile-view="assets">
+      <span class="mobile-nav-icon">▦</span>
+      <span>素材</span>
+    </button>
+    <button type="button" class="mobile-nav-btn active" data-mobile-view="preview">
+      <span class="mobile-nav-icon">▣</span>
+      <span>预览</span>
+    </button>
+    <button type="button" class="mobile-nav-btn" data-mobile-view="settings">
+      <span class="mobile-nav-icon">⚙</span>
+      <span>设置</span>
+    </button>
+  </nav>
+
+  <template id="assetTemplate">
+    <article class="asset-card">
+      <img class="asset-thumb" alt="" loading="lazy" />
+      <div class="asset-body">
+        <div class="asset-head">
+          <strong class="asset-name"></strong>
+          <button type="button" class="icon-btn remove-btn" title="删除这张图片" aria-label="删除这张图片">×</button>
+        </div>
+
+        <div class="asset-controls">
+          <label>
+            <span>数量</span>
+            <input class="qty-input" type="number" min="1" max="999" step="1" />
+          </label>
+          <label>
+            <span>宽 mm</span>
+            <input class="width-input" type="number" min="5" max="200" step="0.5" />
+          </label>
+          <label>
+            <span>高 mm</span>
+            <input class="height-input" type="number" min="5" max="280" step="0.5" />
+          </label>
+        </div>
+
+        <label class="asset-lock">
+          <input class="lock-ratio-input" type="checkbox" checked />
+          <span>锁定原图比例</span>
+        </label>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
