@@ -1,5 +1,5 @@
 const MM_TO_PX = 3.1;
-const VERSION = 8;
+const VERSION = 9;
 let currentPage = 0;
 let lastLayout = [];
 let selectedAssetId = null;
@@ -27,6 +27,8 @@ const state = {
 
 const refs = {
   imageInput: document.getElementById("imageInput"),
+  addImagesBtn: document.getElementById("addImagesBtn"),
+  importStatus: document.getElementById("importStatus"),
   assetList: document.getElementById("assetList"),
   assetTemplate: document.getElementById("assetTemplate"),
   emptyHint: document.getElementById("emptyHint"),
@@ -226,12 +228,22 @@ async function optimizeImage(file) {
   }
 }
 
+function setImportStatus(message = "", visible = true) {
+  if (!refs.importStatus) return;
+  refs.importStatus.textContent = message;
+  refs.importStatus.classList.toggle("hidden", !visible);
+}
+
 async function handleImages(files) {
   syncStateFromControls();
-  const imageFiles = [...files].filter(f => /^image\/(png|jpeg|webp)$/i.test(f.type));
+  const imageFiles = [...files].filter(f => f.type.startsWith("image/"));
+  if (!imageFiles.length) return;
+
+  setImportStatus(`正在导入 0 / ${imageFiles.length} 张…`);
 
   for (let i = 0; i < imageFiles.length; i++) {
     const file = imageFiles[i];
+    setImportStatus(`正在导入 ${i + 1} / ${imageFiles.length}：${file.name}`);
     const optimized = await optimizeImage(file);
 
     let width = state.defaultWidth;
@@ -268,6 +280,9 @@ async function handleImages(files) {
   }
 
   render();
+  setImportStatus(`已导入 ${imageFiles.length} 张照片`, true);
+  window.clearTimeout(window.__importStatusTimer);
+  window.__importStatusTimer = window.setTimeout(() => setImportStatus("", false), 1800);
 }
 
 function createAssetCard(item) {
@@ -855,9 +870,37 @@ document.querySelectorAll(".preset").forEach(btn => {
   });
 });
 
+async function openImagePicker() {
+  // 重新声明这些属性，可避免部分移动浏览器在 DOM 恢复/返回页面后丢失多选状态。
+  refs.imageInput.multiple = true;
+  refs.imageInput.accept = "image/*";
+
+  try {
+    if (typeof refs.imageInput.showPicker === "function") {
+      refs.imageInput.showPicker();
+    } else {
+      refs.imageInput.click();
+    }
+  } catch (_) {
+    refs.imageInput.click();
+  }
+}
+
+refs.addImagesBtn?.addEventListener("click", openImagePicker);
+
 refs.imageInput.addEventListener("change", async e => {
-  await handleImages(e.target.files);
-  refs.imageInput.value = "";
+  const files = e.target.files;
+  if (!files?.length) return;
+  refs.addImagesBtn.disabled = true;
+  try {
+    await handleImages(files);
+  } catch (err) {
+    console.error(err);
+    alert("导入图片时出现问题：" + (err?.message || err));
+  } finally {
+    refs.imageInput.value = "";
+    refs.addImagesBtn.disabled = false;
+  }
 });
 
 refs.applySizeToAllBtn.addEventListener("click", () => {

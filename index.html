@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>A4 贴纸自动排版器 V1.5</title>
+  <title>A4 贴纸自动排版器 V1.6</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div>
-      <h1>A4 贴纸自动排版器 <span class="version">V1.5</span></h1>
-      <p>手机适配版：保留桌面全部功能，并针对触屏、窄屏和多选操作优化。</p>
+      <div class="brand-kicker">STICKER WORKSPACE</div>
+      <h1>A4 贴纸排版器 <span class="version">V1.6</span></h1>
+      <p>保持原图比例，把照片轻松排进 A4。</p>
     </div>
     <div class="top-actions">
       <button id="saveProjectBtn" class="btn secondary">保存项目</button>
@@ -26,13 +27,15 @@
       <section>
         <div class="section-title-row">
           <h2>图片素材</h2>
-          <label class="btn small primary file-button">
-            + 添加图片
-            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
-          </label>
+          <button id="addImagesBtn" type="button" class="btn small primary file-button">
+            <span class="button-plus" aria-hidden="true">＋</span> 添加图片
+          </button>
+          <input id="imageInput" class="native-file-input" type="file" accept="image/*" multiple="multiple" name="images[]" aria-label="选择多张照片" />
         </div>
+        <div id="mobilePhotoHint" class="mobile-photo-hint mobile-only">手机相册支持多选时，可一次勾选多张；也可以重复添加，已有照片不会被清空。</div>
+        <div id="importStatus" class="import-status hidden" aria-live="polite"></div>
         <div id="emptyHint" class="empty-hint">
-          还没有图片。点击“添加图片”，可一次选择数百张；系统会逐张压缩为打印工作图。
+          还没有图片。点击“添加图片”，可以批量选择照片。
         </div>
         <div id="assetList" class="asset-list"></div>
       </section>
@@ -225,15 +228,15 @@
 
   <nav id="mobileNav" class="mobile-nav" aria-label="手机端页面导航">
     <button type="button" class="mobile-nav-btn" data-mobile-view="assets">
-      <span class="mobile-nav-icon">▦</span>
+      <span class="mobile-nav-icon">◉</span>
       <span>素材</span>
     </button>
     <button type="button" class="mobile-nav-btn active" data-mobile-view="preview">
-      <span class="mobile-nav-icon">▣</span>
+      <span class="mobile-nav-icon">⌂</span>
       <span>预览</span>
     </button>
     <button type="button" class="mobile-nav-btn" data-mobile-view="settings">
-      <span class="mobile-nav-icon">⚙</span>
+      <span class="mobile-nav-icon">···</span>
       <span>设置</span>
     </button>
   </nav>
