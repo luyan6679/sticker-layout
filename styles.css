@@ -117,6 +117,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .preset,
 .quick-size-btn,
 .scale-selected-btn,
+.qty-selected-btn,
 .mobile-nav-btn {
   appearance: none;
   -webkit-appearance: none;
@@ -251,6 +252,27 @@ button { -webkit-tap-highlight-color: transparent; }
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.mobile-import-actions {
+  display: none;
+}
+
+.compat-batch-btn {
+  justify-content: center;
+  border: 1px solid rgba(55, 78, 47, .10);
+  background: rgba(255,255,255,.72);
+  color: var(--forest);
+}
+
+.duplicate-tip {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border-radius: 14px;
+  background: rgba(168, 189, 144, .13);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .import-status {
@@ -491,7 +513,8 @@ select:focus {
 }
 
 .quick-size-btn,
-.scale-selected-btn {
+.scale-selected-btn,
+.qty-selected-btn {
   min-height: 34px;
   border: 0;
   border-radius: 999px;
@@ -503,7 +526,8 @@ select:focus {
   font-weight: 700;
 }
 .quick-size-btn:hover,
-.scale-selected-btn:hover { background: var(--sage-soft); color: var(--forest); }
+.scale-selected-btn:hover,
+.qty-selected-btn:hover { background: var(--sage-soft); color: var(--forest); }
 
 .custom-size-group label {
   display: flex;
@@ -832,6 +856,18 @@ select:focus {
     color: #fff;
   }
 
+  .mobile-import-actions.mobile-only {
+    display: flex;
+    width: 100%;
+    margin: 0 0 8px;
+  }
+
+  .compat-batch-btn {
+    min-height: 42px;
+    border-radius: 16px;
+    font-size: 12px;
+  }
+
   .mobile-photo-hint {
     display: block;
     margin: 0 0 10px;
@@ -841,6 +877,13 @@ select:focus {
     color: var(--muted);
     font-size: 11px;
     line-height: 1.55;
+  }
+
+  .duplicate-tip {
+    margin-bottom: 9px;
+    padding: 9px 11px;
+    border-radius: 15px;
+    font-size: 10.5px;
   }
 
   .asset-list { gap: 9px; }
@@ -917,7 +960,8 @@ select:focus {
   .selection-group::-webkit-scrollbar { display: none; }
   .selection-group .btn,
   .quick-size-btn,
-  .scale-selected-btn { flex: 0 0 auto; min-height: 38px; }
+  .scale-selected-btn,
+  .qty-selected-btn { flex: 0 0 auto; min-height: 38px; }
   .custom-size-group { overflow: visible; }
   .custom-size-group label { flex: 1 1 auto; }
   .custom-size-group input { min-width: 74px; width: 100%; }

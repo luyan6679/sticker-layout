@@ -1,5 +1,5 @@
 const MM_TO_PX = 3.1;
-const VERSION = 9;
+const VERSION = 10;
 let currentPage = 0;
 let lastLayout = [];
 let selectedAssetId = null;
@@ -27,7 +27,9 @@ const state = {
 
 const refs = {
   imageInput: document.getElementById("imageInput"),
+  batchFileInput: document.getElementById("batchFileInput"),
   addImagesBtn: document.getElementById("addImagesBtn"),
+  androidBatchBtn: document.getElementById("androidBatchBtn"),
   importStatus: document.getElementById("importStatus"),
   assetList: document.getElementById("assetList"),
   assetTemplate: document.getElementById("assetTemplate"),
@@ -69,6 +71,8 @@ const refs = {
   clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   selectedLongEdgeInput: document.getElementById("selectedLongEdgeInput"),
   applySelectedSizeBtn: document.getElementById("applySelectedSizeBtn"),
+  decreaseSelectedQtyBtn: document.getElementById("decreaseSelectedQtyBtn"),
+  increaseSelectedQtyBtn: document.getElementById("increaseSelectedQtyBtn"),
   mobileMultiSelectBtn: document.getElementById("mobileMultiSelectBtn"),
   mobileNav: document.getElementById("mobileNav")
 };
@@ -195,6 +199,67 @@ function getImageDimensions(src) {
   });
 }
 
+function isLikelyImageFile(file) {
+  if (!file) return false;
+  if (file.type?.startsWith("image/")) return true;
+  return /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i.test(file.name || "");
+}
+
+function fallbackHashBytes(bytes) {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    h1 ^= b;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= b + (i & 255);
+    h2 = Math.imul(h2, 0x85ebca6b);
+  }
+  return `${(h1 >>> 0).toString(16).padStart(8, "0")}${(h2 >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+async function hashBytes(bytes) {
+  if (globalThis.crypto?.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)]
+      .map(byte => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+  return fallbackHashBytes(new Uint8Array(bytes));
+}
+
+async function fingerprintFile(file) {
+  try {
+    const buffer = await file.arrayBuffer();
+    return `source:${await hashBytes(buffer)}`;
+  } catch (_) {
+    return `meta:${file.size || 0}:${file.lastModified || 0}:${file.type || ""}:${file.name || ""}`;
+  }
+}
+
+async function fingerprintText(text) {
+  const bytes = new TextEncoder().encode(String(text || ""));
+  return `visual:${await hashBytes(bytes)}`;
+}
+
+async function buildDuplicateIndex() {
+  const sourceFingerprints = new Set();
+  const visualFingerprints = new Set();
+
+  for (const item of state.items) {
+    if (item.sourceFingerprint) sourceFingerprints.add(item.sourceFingerprint);
+
+    if (!item.visualFingerprint && (item.thumbSrc || item.src)) {
+      try {
+        item.visualFingerprint = await fingerprintText(item.thumbSrc || item.src);
+      } catch (_) {}
+    }
+    if (item.visualFingerprint) visualFingerprints.add(item.visualFingerprint);
+  }
+
+  return { sourceFingerprints, visualFingerprints };
+}
+
 async function optimizeImage(file) {
   const { img, url } = await loadFileImage(file);
   try {
@@ -234,55 +299,100 @@ function setImportStatus(message = "", visible = true) {
   refs.importStatus.classList.toggle("hidden", !visible);
 }
 
-async function handleImages(files) {
+async function handleImages(files, sourceLabel = "照片") {
   syncStateFromControls();
-  const imageFiles = [...files].filter(f => f.type.startsWith("image/"));
-  if (!imageFiles.length) return;
 
-  setImportStatus(`正在导入 0 / ${imageFiles.length} 张…`);
+  const allFiles = [...files];
+  const imageFiles = allFiles.filter(isLikelyImageFile);
+  const ignoredCount = allFiles.length - imageFiles.length;
+  if (!imageFiles.length) {
+    setImportStatus("没有检测到可导入的图片文件。", true);
+    return;
+  }
+
+  const { sourceFingerprints, visualFingerprints } = await buildDuplicateIndex();
+  let importedCount = 0;
+  let duplicateCount = 0;
+  let failedCount = 0;
+
+  setImportStatus(`正在检查 ${sourceLabel} 0 / ${imageFiles.length}…`);
 
   for (let i = 0; i < imageFiles.length; i++) {
     const file = imageFiles[i];
-    setImportStatus(`正在导入 ${i + 1} / ${imageFiles.length}：${file.name}`);
-    const optimized = await optimizeImage(file);
+    setImportStatus(`正在检查 ${i + 1} / ${imageFiles.length}：${file.name}`);
 
-    let width = state.defaultWidth;
-    let height = state.defaultHeight;
-    if (state.preserveAspectOnImport) {
-      const fitted = fitSizeWithinBox(
-        optimized.width,
-        optimized.height,
-        state.defaultWidth,
-        state.defaultHeight
-      );
-      width = fitted.width;
-      height = fitted.height;
-    }
+    try {
+      const sourceFingerprint = await fingerprintFile(file);
+      if (sourceFingerprints.has(sourceFingerprint)) {
+        duplicateCount++;
+        continue;
+      }
 
-    state.items.push({
-      id: uid(),
-      name: file.name,
-      src: optimized.src,
-      thumbSrc: optimized.thumbSrc,
-      qty: 1,
-      width,
-      height,
-      originalWidth: optimized.width,
-      originalHeight: optimized.height,
-      aspectLocked: true
-    });
+      const optimized = await optimizeImage(file);
+      const visualFingerprint = await fingerprintText(optimized.thumbSrc || optimized.src);
 
-    // 每 10 张让浏览器有机会释放上一张图片的解码内存，并更新素材列表。
-    if ((i + 1) % 10 === 0) {
-      renderAssets();
-      await new Promise(resolve => setTimeout(resolve, 0));
+      if (visualFingerprints.has(visualFingerprint)) {
+        duplicateCount++;
+        sourceFingerprints.add(sourceFingerprint);
+        continue;
+      }
+
+      let width = state.defaultWidth;
+      let height = state.defaultHeight;
+      if (state.preserveAspectOnImport) {
+        const fitted = fitSizeWithinBox(
+          optimized.width,
+          optimized.height,
+          state.defaultWidth,
+          state.defaultHeight
+        );
+        width = fitted.width;
+        height = fitted.height;
+      }
+
+      state.items.push({
+        id: uid(),
+        name: file.name,
+        src: optimized.src,
+        thumbSrc: optimized.thumbSrc,
+        qty: 1,
+        width,
+        height,
+        originalWidth: optimized.width,
+        originalHeight: optimized.height,
+        aspectLocked: true,
+        sourceFingerprint,
+        visualFingerprint
+      });
+
+      sourceFingerprints.add(sourceFingerprint);
+      visualFingerprints.add(visualFingerprint);
+      importedCount++;
+
+      if (importedCount % 10 === 0) {
+        renderAssets();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    } catch (err) {
+      failedCount++;
+      console.error("图片导入失败", file?.name, err);
     }
   }
 
-  render();
-  setImportStatus(`已导入 ${imageFiles.length} 张照片`, true);
+  if (importedCount) render();
+
+  const summary = [];
+  if (importedCount) summary.push(`已导入 ${importedCount} 张`);
+  if (duplicateCount) summary.push(`跳过 ${duplicateCount} 张重复照片`);
+  if (ignoredCount) summary.push(`忽略 ${ignoredCount} 个非图片文件`);
+  if (failedCount) summary.push(`${failedCount} 张读取失败`);
+
+  let message = summary.join(" · ") || "没有新增照片";
+  if (duplicateCount) message += "。需要同一照片多次出现，请调整对应图片的“数量”。";
+
+  setImportStatus(message, true);
   window.clearTimeout(window.__importStatusTimer);
-  window.__importStatusTimer = window.setTimeout(() => setImportStatus("", false), 1800);
+  window.__importStatusTimer = window.setTimeout(() => setImportStatus("", false), 4200);
 }
 
 function createAssetCard(item) {
@@ -583,6 +693,21 @@ function scaleSelection(factor) {
   updateSelectionUI();
 }
 
+function adjustSelectionQuantity(delta) {
+  if (!selectedItemIds.size) return;
+  const amount = Number(delta);
+  if (!Number.isFinite(amount) || amount === 0) return;
+
+  state.items.forEach(item => {
+    if (!selectedItemIds.has(item.id)) return;
+    item.qty = Math.max(1, Math.min(999, Math.floor((item.qty || 1) + amount)));
+  });
+
+  renderAssets();
+  renderPreviewOnly();
+  updateSelectionUI();
+}
+
 function renderAssets() {
   refs.assetList.innerHTML = "";
   refs.emptyHint.style.display = state.items.length ? "none" : "block";
@@ -871,35 +996,83 @@ document.querySelectorAll(".preset").forEach(btn => {
 });
 
 async function openImagePicker() {
-  // 重新声明这些属性，可避免部分移动浏览器在 DOM 恢复/返回页面后丢失多选状态。
   refs.imageInput.multiple = true;
   refs.imageInput.accept = "image/*";
-
   try {
-    if (typeof refs.imageInput.showPicker === "function") {
-      refs.imageInput.showPicker();
-    } else {
-      refs.imageInput.click();
-    }
+    if (typeof refs.imageInput.showPicker === "function") refs.imageInput.showPicker();
+    else refs.imageInput.click();
   } catch (_) {
     refs.imageInput.click();
   }
 }
 
-refs.addImagesBtn?.addEventListener("click", openImagePicker);
+function setImportButtonsDisabled(disabled) {
+  if (refs.addImagesBtn) refs.addImagesBtn.disabled = disabled;
+  if (refs.androidBatchBtn) refs.androidBatchBtn.disabled = disabled;
+}
 
-refs.imageInput.addEventListener("change", async e => {
-  const files = e.target.files;
+async function processSelectedFiles(files, sourceLabel) {
   if (!files?.length) return;
-  refs.addImagesBtn.disabled = true;
+  setImportButtonsDisabled(true);
   try {
-    await handleImages(files);
+    await handleImages(files, sourceLabel);
   } catch (err) {
     console.error(err);
     alert("导入图片时出现问题：" + (err?.message || err));
   } finally {
+    setImportButtonsDisabled(false);
+  }
+}
+
+async function openCompatibleBatchPicker() {
+  if (typeof window.showOpenFilePicker === "function") {
+    try {
+      const handles = await window.showOpenFilePicker({
+        multiple: true,
+        types: [{
+          description: "图片",
+          accept: {
+            "image/*": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".heic", ".heif"]
+          }
+        }]
+      });
+      const files = await Promise.all(handles.map(handle => handle.getFile()));
+      await processSelectedFiles(files, "批量照片");
+      return;
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      console.warn("showOpenFilePicker 不可用，回退到 input[type=file]", err);
+    }
+  }
+
+  refs.batchFileInput.multiple = true;
+  refs.batchFileInput.removeAttribute("accept");
+  try {
+    if (typeof refs.batchFileInput.showPicker === "function") refs.batchFileInput.showPicker();
+    else refs.batchFileInput.click();
+  } catch (_) {
+    refs.batchFileInput.click();
+  }
+}
+
+refs.addImagesBtn?.addEventListener("click", openImagePicker);
+refs.androidBatchBtn?.addEventListener("click", openCompatibleBatchPicker);
+
+refs.imageInput.addEventListener("change", async e => {
+  const files = e.target.files;
+  try {
+    await processSelectedFiles(files, "相册照片");
+  } finally {
     refs.imageInput.value = "";
-    refs.addImagesBtn.disabled = false;
+  }
+});
+
+refs.batchFileInput?.addEventListener("change", async e => {
+  const files = e.target.files;
+  try {
+    await processSelectedFiles(files, "批量照片");
+  } finally {
+    refs.batchFileInput.value = "";
   }
 });
 
@@ -1209,6 +1382,8 @@ refs.printBtn.addEventListener("click", () => {
 
 refs.selectPageBtn.addEventListener("click", selectCurrentPage);
 refs.clearSelectionBtn.addEventListener("click", clearPreviewSelection);
+refs.decreaseSelectedQtyBtn?.addEventListener("click", () => adjustSelectionQuantity(-1));
+refs.increaseSelectedQtyBtn?.addEventListener("click", () => adjustSelectionQuantity(1));
 
 document.querySelectorAll(".quick-size-btn").forEach(button => {
   button.addEventListener("click", () => {
