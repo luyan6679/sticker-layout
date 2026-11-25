@@ -1,16 +1,14 @@
-# V1.9 部署与升级
+# V2.0 GitHub / Vercel 更新说明
 
-保持已有流程：GitHub `luyan6679/sticker-layout` 的 `main` 分支 → Vercel 自动部署 → `https://sticker.paperlabs.cn`。
+适用于已配置的 GitHub `luyan6679/sticker-layout` 与 Vercel `sticker.paperlabs.cn`。
 
-1. 先保留 V1.8 的 ZIP 作为回退备份。
-2. 解压 V1.9，直接将**压缩包内的文件和 `modules/` 整个文件夹**上传到 GitHub 仓库根目录，覆盖同名文件：
-   - `index.html`、`styles.css`、`app.js`
-   - `modules/paper.js`、`modules/layout.js`、`modules/preview.js`、`modules/pdf.js`
-   - `README.md`、`DEPLOY.md`、`tests/layout.test.mjs`（文档与测试可选）
-3. 确认 `index.html` 与 `modules/` 在同一层级；**不要只上传三份旧文件**，否则页面会因缺少模块而无法运行。
-4. GitHub 选择 `Commit directly to main`，提交说明建议：`Update to V1.9 - modular workspace`。
-5. Vercel `Deployments` 出现最新一条 `Ready` 后，打开 `sticker.paperlabs.cn`，做纸张切换、批量删除、PDF 导出测试。
+1. 备份原来的 V1.9 ZIP 或 GitHub 提交，方便回滚。
+2. 解压本包。确保同时存在 `index.html`、`styles.css`、`app.js`、`css/`、`modules/` 等文件和文件夹。
+3. 打开 GitHub 仓库，选择 `main`，进入 `Add file → Upload files`。把解压后所有根目录文件、`css` 文件夹、`modules` 文件夹拖入上传区。**不要上传整个 ZIP**；不要漏掉 `css/canvas-shell.css` 和 `modules/shell.js`。
+4. 提交消息填写 `Update to V2.0 - canvas first UI`，选择 `Commit directly to the main branch`。
+5. 在 Vercel `Deployments` 查看新部署变成 `Ready`。网站访问地址仍为 `https://sticker.paperlabs.cn`。
+6. 安卓手机使用无代理的厂商浏览器打开，测试添加图片、素材抽屉、设置、点选贴纸、编辑、导出 PDF 和文件保存。
 
-如果不想上传测试目录，完全可以去掉 `tests/`，运行站点只需要 HTML/CSS/JS 文件与 `modules/`。
+若 GitHub 浏览器不能拖拽，可尝试 Edge 或网页的 `choose your files`（仅文件，保留子目录需要在 GitHub 对应路径下分别上传）。
 
-**无后端、无 npm 构建、无付费 CDN 依赖。** Vercel 的 Framework Preset 保持 `Other`，Root Directory 保持 `./`；Build Command 保持不覆盖默认值。
+注意：V2.0 没有引入第三方 CDN、数据库或后端，原有 GitHub → Vercel 自动部署不变。

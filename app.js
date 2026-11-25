@@ -2,9 +2,11 @@ import { PAPER_PRESETS, resolvePaperSize, paperCaption } from './modules/paper.j
 import { expandItems as expandItemsFromState, calculateLayout, removeSelectedCopies, selectedSourceIds } from './modules/layout.js';
 import { createPageShell, populatePageShell, scrollInside } from './modules/preview.js';
 import { buildPdfBlob } from './modules/pdf.js';
+import { createCanvasShell } from './modules/shell.js';
 
 const MM_TO_PX = 3.1;
-const VERSION = 12;
+const VERSION = 13;
+let canvasShell = null;
 
 let currentPage = 0;
 let pageObserver = null;
@@ -334,6 +336,15 @@ async function optimizeImage(file) {
   }
 }
 
+function showCanvasToast(message) {
+  const toast = document.getElementById('canvasToast');
+  if (!toast || !message) return;
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  clearTimeout(window.__canvasToastTimer);
+  window.__canvasToastTimer = setTimeout(() => toast.classList.add('hidden'), 4800);
+}
+
 function setImportStatus(message = "", visible = true) {
   if (!refs.importStatus) return;
   refs.importStatus.textContent = message;
@@ -432,6 +443,7 @@ async function handleImages(files, sourceLabel = "照片") {
   if (duplicateCount) message += "。需要同一照片多次出现，请调整对应图片的“数量”。";
 
   setImportStatus(message, true);
+  showCanvasToast(message);
   window.clearTimeout(window.__importStatusTimer);
   window.__importStatusTimer = window.setTimeout(() => setImportStatus("", false), 4200);
 }
@@ -593,7 +605,12 @@ function isMobileLayout() {
 }
 
 function setMobileView(view, options = {}) {
-  mobileView = ["assets", "preview", "settings"].includes(view) ? view : "preview";
+  // V2.0: mobile editing stays visible; tools open as drawers above it.
+  if (view === 'assets' || view === 'settings') {
+    canvasShell?.openDrawer(view);
+    return;
+  }
+  mobileView = "preview";
 
   document.body.classList.remove(
     "mobile-view-assets",
@@ -621,12 +638,13 @@ function setMobileMultiSelectMode(enabled) {
   if (!mobileMultiSelectMode) {
     selectionAnchorIndex = null;
   }
+  canvasShell?.syncSelection(selectedItemIds.size, mobileMultiSelectMode);
 }
 
 function getPreviewScale(paper) {
   const measuredWidth = refs.previewArea?.clientWidth || window.innerWidth;
-  const availableWidth = Math.max(160, measuredWidth - (isMobileLayout() ? 28 : 64));
-  return Math.max(0.4, Math.min(MM_TO_PX, availableWidth / paper.width));
+  const availableWidth = Math.max(160, measuredWidth - (isMobileLayout() ? 16 : 70));
+  return Math.max(0.4, Math.min(isMobileLayout() ? 3.15 : 3.5, availableWidth / paper.width));
 }
 
 function showAssetSpotlight(itemId) {
@@ -654,7 +672,7 @@ function focusAssetCard(itemId) {
     void target.offsetWidth;
     target.classList.add('asset-card-flash');
   }
-  showAssetSpotlight(itemId);
+  // The canvas remains fixed. To inspect this item, open the assets drawer.
 }
 
 refs.assetSpotlightClose?.addEventListener('click', () => refs.assetSpotlight.classList.add('hidden'));
@@ -672,6 +690,7 @@ function updateSelectionUI() {
   const count = selectedItemIds.size;
   refs.selectionCount.textContent = count;
   refs.selectionToolbar.classList.toggle('hidden', count === 0);
+  canvasShell?.syncSelection(count, mobileMultiSelectMode);
   refs.deleteSelectedBtn?.classList.toggle('hidden', count === 0);
   document.querySelectorAll('.sticker[data-instance-id]').forEach(sticker => {
     sticker.classList.toggle('sticker-selected', selectedItemIds.has(sticker.dataset.instanceId));
@@ -867,7 +886,9 @@ function renderPreviewOnly() {
   for (const id of selectedItemIds) if (!validIds.has(id)) selectedItemIds.delete(id);
   updatePageNav(pages);
   if (!state.items.length || !pages.length) {
-    preview.innerHTML = `<div class="preview-placeholder">${state.items.length ? '当前图片尺寸无法放入纸张，请减小贴纸尺寸或页边距。' : '还没有照片。先在“素材”中添加图片，随后会在这里连续显示每一页。'}</div>`;
+    preview.innerHTML = state.items.length
+      ? `<div class="preview-placeholder empty-canvas"><div class="empty-icon" aria-hidden="true">▤</div><h2>纸张暂时放不下贴纸</h2><p>可以切换纸张或减小贴纸尺寸，原始图片仍在素材库里。</p></div>`
+      : `<div class="preview-placeholder empty-canvas"><div class="empty-icon" aria-hidden="true">＋</div><h2>开始制作你的贴纸</h2><p>选择照片后，排版会在这张画布上自动完成。</p><button type="button" class="empty-add-button" data-action="add-photos">添加照片</button></div>`;
     updatePaperSummary();
     return;
   }
@@ -1555,7 +1576,11 @@ function updatePaperCustomVisibility() {
 }
 
 function updatePaperSummary() {
-  if (refs.paperQuickBtn) refs.paperQuickBtn.textContent = `▤ ${paperCaption(state)} ▾`;
+  if (refs.paperQuickBtn) {
+    const paperName = state.paper === 'custom' ? '自定义' : state.paper;
+    refs.paperQuickBtn.textContent = `${paperName} · ${state.orientation === 'landscape' ? '横向' : '纵向'} ▾`;
+    refs.paperQuickBtn.title = paperCaption(state);
+  }
   if (refs.paperSheetSize) refs.paperSheetSize.textContent = paperCaption(state);
   refs.paperSheetChoices?.querySelectorAll('[data-paper]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.paper === state.paper);
@@ -1610,7 +1635,7 @@ function initPaperPicker() {
         setPaperChoice(preset.id);
         if (preset.id === 'custom') {
           closePaperSheet();
-          if (isMobileLayout()) setMobileView('settings');
+          setMobileView('settings');
           refs.customPaperWidth.focus();
         } else closePaperSheet();
       });
@@ -1647,6 +1672,20 @@ refs.fitOversizeBtn?.addEventListener('click', () => {
   });
   render();
   updateSelectionUI();
+});
+
+canvasShell = createCanvasShell({
+  openImagePicker,
+  openExportSheet,
+  selectModeToggle: () => setMobileMultiSelectMode(!mobileMultiSelectMode),
+  getSelectMode: () => mobileMultiSelectMode,
+  clearSelection: clearPreviewSelection,
+  getSelectionCount: () => selectedItemIds.size,
+  onAssetsOpened: () => {
+    if (!selectedAssetId) return;
+    const card = [...refs.assetList.querySelectorAll('.asset-card')].find(node => node.dataset.itemId === selectedAssetId);
+    if (card) scrollInside(refs.assetList, card, 'smooth');
+  }
 });
 
 initPaperPicker();

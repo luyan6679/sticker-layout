@@ -3,17 +3,24 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>排版工作台 V1.9</title>
+  <title>排版工作台 · Paper Labs</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="css/canvas-shell.css" />
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <div class="brand-kicker">STICKER WORKSPACE</div>
-      <h1>排版工作台 <span class="version">V1.9</span></h1>
-      <p>多种纸张 · 连续预览 · 自动补位。</p>
+    <div class="brand-lockup">
+      <span class="brand-symbol" aria-hidden="true">▤</span>
+      <div class="brand-copy">
+        <h1>排版工作台 <span class="version">V2.0</span></h1>
+        <p>Paper Labs · 让纸张成为主角</p>
+      </div>
     </div>
-    <div class="top-actions">
+    <div class="top-utilities">
+      <button id="paperQuickBtn" class="paper-quick-btn" type="button" aria-haspopup="dialog" aria-controls="paperSheet">A4 · 纵向 ▾</button>
+      <button id="headerExportBtn" class="header-export-btn" type="button">导出 <span aria-hidden="true">↗</span></button>
+    </div>
+    <div class="top-actions" hidden>
       <button id="saveProjectBtn" class="btn secondary">保存项目</button>
       <button id="exportProjectBtn" class="btn secondary">导出项目</button>
       <button id="importProjectBtn" class="btn secondary">导入项目</button>
@@ -24,10 +31,12 @@
   </header>
 
   <main class="app-grid">
-    <aside class="panel left-panel">
+    <aside class="panel left-panel" id="assetsDrawer" role="dialog" aria-modal="true" aria-label="图片素材" aria-hidden="true">
       <section>
+        <div class="drawer-handle" aria-hidden="true"></div>
         <div class="section-title-row">
-          <h2>图片素材</h2>
+          <h2>图片素材 <small>独立管理</small></h2>
+          <button id="closeAssetsDrawerBtn" type="button" class="drawer-close" aria-label="关闭素材库">×</button>
           <button id="addImagesBtn" type="button" class="btn small primary file-button">
             <span class="button-plus" aria-hidden="true">＋</span> 添加图片
           </button>
@@ -53,7 +62,6 @@
           <strong id="pageSummary">0 张贴纸 · 0 页</strong>
           <span id="layoutWarning" class="warning"></span>
         </div>
-        <button id="paperQuickBtn" class="paper-quick-btn" type="button" aria-haspopup="dialog" aria-controls="paperSheet">▤ A4 · 纵向 · 210 × 297 mm ▾</button>
         <div id="pageNav" class="page-nav hidden">
           <button id="prevPageBtn" class="btn secondary small">上一页</button>
           <select id="pageSelect" aria-label="页码"></select>
@@ -66,6 +74,10 @@
         </div>
       </div>
 
+      <div id="selectionSheetBackdrop" class="selection-sheet-backdrop hidden" aria-hidden="true">
+        <section class="selection-sheet" role="dialog" aria-modal="true" aria-label="编辑已选贴纸">
+          <div class="drawer-handle" aria-hidden="true"></div>
+          <div class="sheet-heading"><div><span class="sheet-kicker">SELECTION</span><h2>编辑选中贴纸</h2></div><button id="closeSelectionSheetBtn" class="drawer-close" type="button" aria-label="关闭编辑面板">×</button></div>
       <div id="selectionToolbar" class="selection-toolbar hidden">
         <div class="selection-status">
           已选 <strong id="selectionCount">0</strong> 张贴纸
@@ -116,17 +128,34 @@
         </div>
       </div>
 
+        </section>
+      </div>
+
       <div id="layoutIssuePanel" class="layout-issue-panel hidden" role="status">
         <span class="issue-detail">部分贴纸无法放入当前纸张。</span>
         <button id="fitOversizeBtn" class="btn secondary small" type="button">自动缩小超出项</button>
       </div>
 
-      <div id="previewArea" class="preview-area" role="region" aria-label="连续纸张预览，可独立滚动" tabindex="0">
+      <div id="previewArea" class="preview-area" role="region" aria-label="排版画布，向下滚动查看所有纸页" tabindex="0">
         <div class="preview-placeholder">添加照片后，纸张会在这里按顺序连续展示。</div>
       </div>
+      <div id="canvasToast" class="canvas-toast hidden" role="status" aria-live="polite"></div>
+      <div class="selection-mini hidden" id="selectionMini">
+        <button id="openSelectionSheetBtn" type="button" class="selection-mini-open">已选 <strong id="selectionMiniCount">0</strong> 张 · 编辑尺寸与数量 <span aria-hidden="true">⌃</span></button>
+        <button id="selectionMiniClearBtn" class="selection-mini-clear" type="button" aria-label="取消选择">×</button>
+      </div>
+      <nav class="canvas-dock" aria-label="排版工作台快捷操作">
+        <button id="canvasAddBtn" class="dock-button dock-add" type="button"><span class="dock-icon" aria-hidden="true">＋</span><span>添加</span></button>
+        <button id="canvasAssetsBtn" class="dock-button" type="button"><span class="dock-icon" aria-hidden="true">▦</span><span>素材</span></button>
+        <button id="canvasSelectBtn" class="dock-button" type="button" aria-pressed="false"><span class="dock-icon" aria-hidden="true">☑</span><span>多选</span></button>
+        <button id="canvasSettingsBtn" class="dock-button" type="button"><span class="dock-icon" aria-hidden="true">⚙</span><span>设置</span></button>
+        <button id="canvasExportBtn" class="dock-button dock-export" type="button"><span class="dock-icon" aria-hidden="true">↧</span><span>导出</span></button>
+      </nav>
     </section>
 
-    <aside class="panel right-panel">
+    <aside class="panel right-panel" id="settingsDrawer" role="dialog" aria-modal="true" aria-label="排版设置" aria-hidden="true">
+      <div class="drawer-handle" aria-hidden="true"></div>
+      <div class="panel-header"><div><span class="sheet-kicker">WORKSPACE SETTINGS</span><h2>排版设置</h2></div><button id="closeSettingsDrawerBtn" class="drawer-close" type="button" aria-label="关闭设置">×</button></div>
       <section>
         <h2>纸张设置</h2>
 
@@ -249,6 +278,7 @@
         <p>导出 PDF 时使用当前纸张的实际毫米尺寸；连接打印机时请选择 <strong>100% / 实际大小</strong>，并确认打印机纸张与所选规格一致。</p>
       </section>
     </aside>
+    <div id="drawerBackdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
   </main>
 
   <div id="undoToast" class="undo-toast hidden" role="status" aria-live="polite">
