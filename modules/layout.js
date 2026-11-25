@@ -1,3 +1,5 @@
+import { packDensePages } from './dense-layout.js';
+
 /** 纯函数：不访问 DOM，不更改输入项目，便于单元测试和后续更换装箱算法。 */
 export function expandItems(items, mode = 'compact') {
   const expanded = [];
@@ -19,10 +21,21 @@ export function calculateLayout(state, paper) {
   const all = expandItems(state.items, state.layoutMode);
   const tooLarge = [];
   const items = all.filter(item => {
-    const ok = item.width > 0 && item.height > 0 && item.width <= usableW + 1e-6 && item.height <= usableH + 1e-6;
+    const valid = item.width > 0 && item.height > 0;
+    const straight = item.width <= usableW + 1e-6 && item.height <= usableH + 1e-6;
+    const sideways = state.layoutMode === 'ultra' && state.denseAllowRotation !== false &&
+      item.height <= usableW + 1e-6 && item.width <= usableH + 1e-6;
+    const ok = valid && (straight || sideways);
     if (!ok) tooLarge.push(item);
     return ok;
   });
+  if (state.layoutMode === 'ultra') {
+    return {
+      pages: packDensePages(items, paper, margin, gap, state.denseAllowRotation !== false),
+      tooLarge,
+      total: all.length
+    };
+  }
   const pages = [];
   let page = [];
   let x = margin, y = margin, rowH = 0;

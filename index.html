@@ -12,7 +12,7 @@
     <div class="brand-lockup">
       <span class="brand-symbol" aria-hidden="true">▤</span>
       <div class="brand-copy">
-        <h1>排版工作台 <span class="version">V2.0</span></h1>
+        <h1>排版工作台 <span class="version">V2.1</span></h1>
         <p>Paper Labs · 让纸张成为主角</p>
       </div>
     </div>
@@ -194,9 +194,18 @@
           <span>自动排列方式</span>
           <select id="layoutMode">
             <option value="compact" selected>紧凑排列</option>
+            <option value="ultra">超密集排版 · 见缝插针</option>
             <option value="order">按上传顺序</option>
           </select>
         </label>
+        <div id="denseRotationField" class="dense-layout-options hidden">
+          <label class="check-row">
+            <input id="denseAllowRotation" type="checkbox" checked />
+            <span>允许贴纸自动旋转 90°，进一步利用空白</span>
+          </label>
+          <p class="helper-text">不改变图片尺寸与比例。自动寻找当前纸张的空隙，横图、竖图可以交错摆放；允许旋转时，预览、打印和 PDF 会同步旋转画面。</p>
+          <p class="helper-text">优先减少页数并提高空间利用率；复杂组合不保证数学上的绝对最优。</p>
+        </div>
       </section>
 
       <section>

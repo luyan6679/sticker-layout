@@ -5,7 +5,7 @@ import { buildPdfBlob } from './modules/pdf.js';
 import { createCanvasShell } from './modules/shell.js';
 
 const MM_TO_PX = 3.1;
-const VERSION = 13;
+const VERSION = 14;
 let canvasShell = null;
 
 let currentPage = 0;
@@ -31,6 +31,7 @@ const state = {
   defaultHeight: 50,
   fitMode: "contain",
   layoutMode: "compact",
+  denseAllowRotation: true,
   showBorder: true,
   showCutMarks: false,
   preserveAspectOnImport: true,
@@ -80,6 +81,8 @@ const refs = {
   marginInput: document.getElementById("marginInput"),
   gapInput: document.getElementById("gapInput"),
   layoutMode: document.getElementById("layoutMode"),
+  denseRotationField: document.getElementById("denseRotationField"),
+  denseAllowRotation: document.getElementById("denseAllowRotation"),
   defaultWidth: document.getElementById("defaultWidth"),
   defaultHeight: document.getElementById("defaultHeight"),
   fitMode: document.getElementById("fitMode"),
@@ -906,6 +909,12 @@ function renderPreviewOnly() {
   const lazyShells = [];
   pages.forEach((placements, pageIndex) => {
     const wrap = createPageShell(paper, scale, pageIndex, pages.length, placements.length);
+    if (state.layoutMode === 'ultra') {
+      const usableArea = Math.max(1, (paper.width - 2 * state.margin) * (paper.height - 2 * state.margin));
+      const usedArea = placements.reduce((sum, p) => sum + p.width * p.height, 0);
+      const label = wrap.querySelector('.page-label');
+      if (label) label.textContent += ` · 有效区利用率 ${Math.min(100, usedArea / usableArea * 100).toFixed(1)}%`;
+    }
     preview.appendChild(wrap);
     lazyShells.push({wrap,placements,pageIndex,firstIndex:offset});
     offset += placements.length;
@@ -968,6 +977,10 @@ function updateBatchSizingUI() {
   }
 }
 
+function updateDenseModeUI() {
+  refs.denseRotationField?.classList.toggle('hidden', refs.layoutMode.value !== 'ultra');
+}
+
 function syncStateFromControls() {
   state.paper = refs.paperSize.value;
   state.customPaperWidth = safeNumber(refs.customPaperWidth.value, 210, 50, 500);
@@ -976,6 +989,7 @@ function syncStateFromControls() {
   state.margin = safeNumber(refs.marginInput.value, 8, 0, 30);
   state.gap = safeNumber(refs.gapInput.value, 3, 0, 30);
   state.layoutMode = refs.layoutMode.value;
+  state.denseAllowRotation = refs.denseAllowRotation.checked;
   state.defaultWidth = safeNumber(refs.defaultWidth.value, 50, 5, 500);
   state.defaultHeight = safeNumber(refs.defaultHeight.value, 50, 5, 700);
   state.fitMode = refs.fitMode.value;
@@ -995,6 +1009,8 @@ function syncControlsFromState() {
   refs.marginInput.value = state.margin;
   refs.gapInput.value = state.gap;
   refs.layoutMode.value = state.layoutMode;
+  refs.denseAllowRotation.checked = state.denseAllowRotation !== false;
+  updateDenseModeUI();
   refs.defaultWidth.value = state.defaultWidth;
   refs.defaultHeight.value = state.defaultHeight;
   refs.fitMode.value = state.fitMode || "contain";
@@ -1014,6 +1030,7 @@ function syncControlsFromState() {
   "marginInput",
   "gapInput",
   "layoutMode",
+  "denseAllowRotation",
   "defaultWidth",
   "defaultHeight",
   "fitMode",
@@ -1025,6 +1042,7 @@ function syncControlsFromState() {
   refs[key].addEventListener("input", () => {
     syncStateFromControls();
     updatePaperCustomVisibility();
+    updateDenseModeUI();
     if (key === "defaultWidth" || key === "defaultHeight") {
       document.querySelectorAll(".preset").forEach(btn => btn.classList.remove("active"));
     }
@@ -1215,6 +1233,8 @@ function restoreSerialized(text) {
   if (incoming.preserveAspectOnImport == null) incoming.preserveAspectOnImport = true;
   if (incoming.batchSizingMode == null) incoming.batchSizingMode = "box";
   if (incoming.edgeSize == null) incoming.edgeSize = 50;
+  if (incoming.denseAllowRotation == null) incoming.denseAllowRotation = true;
+  if (!['compact','order','ultra'].includes(incoming.layoutMode)) incoming.layoutMode = 'compact';
 
   Object.assign(state, incoming);
   syncControlsFromState();
@@ -1345,7 +1365,7 @@ function buildPrintHTML() {
     const itemsHtml = placements.map(p => `
       <div class="sticker ${state.showBorder ? "border-on" : ""}" style="
         left:${p.x}mm;top:${p.y}mm;width:${p.width}mm;height:${p.height}mm;">
-        <img src="${p.src}" alt="${escapeHtml(p.name)}" style="object-fit:${state.fitMode}" />
+        <img src="${p.src}" alt="${escapeHtml(p.name)}" style="object-fit:${state.fitMode};${p.rotated ? `position:absolute;left:50%;top:50%;width:${p.height}mm;height:${p.width}mm;transform:translate(-50%,-50%) rotate(90deg);` : ''}" />
         ${state.showCutMarks ? `
           <i class="cut c1"></i><i class="cut c2"></i><i class="cut c3"></i><i class="cut c4"></i>
         ` : ""}

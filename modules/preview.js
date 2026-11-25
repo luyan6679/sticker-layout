@@ -53,6 +53,16 @@ export function populatePageShell(wrap, placements, opts) {
     img.alt = p.name;
     img.loading = 'lazy';
     img.style.objectFit = opts.fitMode;
+    if (p.rotated) {
+      // The physical sticker rectangle is rotated, not stretched. Keep the
+      // original picture dimensions, and rotate the picture about its center.
+      img.style.position = 'absolute';
+      img.style.left = '50%';
+      img.style.top = '50%';
+      img.style.width = `${p.height * opts.scale}px`;
+      img.style.height = `${p.width * opts.scale}px`;
+      img.style.transform = 'translate(-50%, -50%) rotate(90deg)';
+    }
     sticker.appendChild(img);
     if (opts.showCutMarks) addCutMarks(sticker, opts.scale);
     page.appendChild(sticker);

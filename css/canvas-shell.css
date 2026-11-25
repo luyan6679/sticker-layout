@@ -344,3 +344,15 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   font-size:12px;font-weight:680;text-align:center;line-height:1.45;
 }
 @media(max-width:760px) {.canvas-toast {bottom:calc(74px + env(safe-area-inset-bottom));font-size:11px;padding:9px 12px;}}
+
+/* V2.1: ultra-dense layout mode, settings drawer only; canvas size unchanged. */
+.dense-layout-options {
+  margin:5px 0 14px;
+  padding:12px 14px;
+  border:1px solid #d7e4d0;
+  border-radius:15px;
+  background:#f2f6ee;
+}
+.dense-layout-options .check-row { margin:0 0 7px; align-items:flex-start; line-height:1.45; }
+.dense-layout-options .check-row input { flex:0 0 auto; margin-top:3px; }
+.dense-layout-options .helper-text { margin:5px 0 0; line-height:1.5; font-size:12px; }

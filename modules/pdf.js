@@ -96,7 +96,7 @@ export async function buildPdfBlob({ state, pages, tooLarge, paper, onProgress =
   const uniqueKeys = [];
   const seenKeys = new Set();
   pages.flat().forEach(p => {
-    const key = `${p.id}|${p.width}|${p.height}|${state.fitMode}`;
+    const key = `${p.id}|${p.rotated ? p.height : p.width}|${p.rotated ? p.width : p.height}|${state.fitMode}`;
     if (!seenKeys.has(key)) {
       seenKeys.add(key);
       uniqueKeys.push({ key, placement: p });
@@ -110,7 +110,9 @@ export async function buildPdfBlob({ state, pages, tooLarge, paper, onProgress =
     onProgress(`正在准备图片 ${i + 1} / ${uniqueKeys.length}…`);
     let rendered = renderCache.get(key);
     if (!rendered) {
-      rendered = await renderStickerJpeg(item, placement.width, placement.height, state.fitMode);
+      rendered = await renderStickerJpeg(item,
+        placement.rotated ? placement.height : placement.width,
+        placement.rotated ? placement.width : placement.height, state.fitMode);
       renderCache.set(key, rendered);
     }
     renderedImages.set(key, rendered);
@@ -150,7 +152,7 @@ export async function buildPdfBlob({ state, pages, tooLarge, paper, onProgress =
     let content = "";
 
     placements.forEach((p, index) => {
-      const key = `${p.id}|${p.width}|${p.height}|${state.fitMode}`;
+      const key = `${p.id}|${p.rotated ? p.height : p.width}|${p.rotated ? p.width : p.height}|${state.fitMode}`;
       if (!resourceNames.has(key)) resourceNames.set(key, `Im${resourceNames.size + 1}`);
       const imageName = resourceNames.get(key);
       const x = p.x * PDF_PT_PER_MM;
@@ -158,7 +160,13 @@ export async function buildPdfBlob({ state, pages, tooLarge, paper, onProgress =
       const w = p.width * PDF_PT_PER_MM;
       const h = p.height * PDF_PT_PER_MM;
 
-      content += `q\n${formatPdfNumber(w)} 0 0 ${formatPdfNumber(h)} ${formatPdfNumber(x)} ${formatPdfNumber(y)} cm\n/${imageName} Do\nQ\n`;
+      if (p.rotated) {
+        // Rotate 90° clockwise inside the physical sticker bounding box.
+        // PDF coordinates point upwards, hence this image transform.
+        content += `q\n0 ${formatPdfNumber(-h)} ${formatPdfNumber(w)} 0 ${formatPdfNumber(x)} ${formatPdfNumber(y+h)} cm\n/${imageName} Do\nQ\n`;
+      } else {
+        content += `q\n${formatPdfNumber(w)} 0 0 ${formatPdfNumber(h)} ${formatPdfNumber(x)} ${formatPdfNumber(y)} cm\n/${imageName} Do\nQ\n`;
+      }
 
       if (state.showBorder) {
         const lineWidth = 0.2 * PDF_PT_PER_MM;
