@@ -1,6 +1,16 @@
+import { PAPER_PRESETS, resolvePaperSize, paperCaption } from './modules/paper.js';
+import { expandItems as expandItemsFromState, calculateLayout, removeSelectedCopies, selectedSourceIds } from './modules/layout.js';
+import { createPageShell, populatePageShell, scrollInside } from './modules/preview.js';
+import { buildPdfBlob } from './modules/pdf.js';
+
 const MM_TO_PX = 3.1;
-const VERSION = 10;
+const VERSION = 12;
+
 let currentPage = 0;
+let pageObserver = null;
+let scrollRequest = 0;
+const undoStack = [];
+let assetSpotlightTimer = null;
 let lastLayout = [];
 let selectedAssetId = null;
 const selectedItemIds = new Set();
@@ -10,6 +20,8 @@ let mobileView = "preview";
 
 const state = {
   paper: "A4",
+  customPaperWidth: 210,
+  customPaperHeight: 297,
   orientation: "portrait",
   margin: 8,
   gap: 3,
@@ -42,6 +54,26 @@ const refs = {
   nextPageBtn: document.getElementById("nextPageBtn"),
   layoutWarning: document.getElementById("layoutWarning"),
   paperSize: document.getElementById("paperSize"),
+  customPaperFields: document.getElementById("customPaperFields"),
+  customPaperWidth: document.getElementById("customPaperWidth"),
+  customPaperHeight: document.getElementById("customPaperHeight"),
+  paperQuickBtn: document.getElementById("paperQuickBtn"),
+  paperSheetBackdrop: document.getElementById("paperSheetBackdrop"),
+  paperSheetChoices: document.getElementById("paperSheetChoices"),
+  paperSheetSize: document.getElementById("paperSheetSize"),
+  paperSheetOrientation: document.getElementById("paperSheetOrientation"),
+  closePaperSheetBtn: document.getElementById("closePaperSheetBtn"),
+  layoutIssuePanel: document.getElementById("layoutIssuePanel"),
+  fitOversizeBtn: document.getElementById("fitOversizeBtn"),
+  deleteSelectedBtn: document.getElementById("deleteSelectedBtn"),
+  undoToast: document.getElementById("undoToast"),
+  undoBtn: document.getElementById("undoBtn"),
+  assetSpotlight: document.getElementById("assetSpotlight"),
+  assetSpotlightImg: document.getElementById("assetSpotlightImg"),
+  assetSpotlightName: document.getElementById("assetSpotlightName"),
+  assetSpotlightQty: document.getElementById("assetSpotlightQty"),
+  assetSpotlightOpen: document.getElementById("assetSpotlightOpen"),
+  assetSpotlightClose: document.getElementById("assetSpotlightClose"),
   orientation: document.getElementById("orientation"),
   marginInput: document.getElementById("marginInput"),
   gapInput: document.getElementById("gapInput"),
@@ -65,6 +97,19 @@ const refs = {
   importProjectBtn: document.getElementById("importProjectBtn"),
   projectFileInput: document.getElementById("projectFileInput"),
   printBtn: document.getElementById("printBtn"),
+  exportPdfBtn: document.getElementById("exportPdfBtn"),
+  mobileExportFab: document.getElementById("mobileExportFab"),
+  exportSheetBackdrop: document.getElementById("exportSheetBackdrop"),
+  exportSheet: document.getElementById("exportSheet"),
+  closeExportSheetBtn: document.getElementById("closeExportSheetBtn"),
+  cancelExportSheetBtn: document.getElementById("cancelExportSheetBtn"),
+  exportSheetStatus: document.getElementById("exportSheetStatus"),
+  sheetExportPdfBtn: document.getElementById("sheetExportPdfBtn"),
+  sheetPrintBtn: document.getElementById("sheetPrintBtn"),
+  sheetSaveProjectBtn: document.getElementById("sheetSaveProjectBtn"),
+  sheetLoadProjectBtn: document.getElementById("sheetLoadProjectBtn"),
+  sheetExportProjectBtn: document.getElementById("sheetExportProjectBtn"),
+  sheetImportProjectBtn: document.getElementById("sheetImportProjectBtn"),
   selectionToolbar: document.getElementById("selectionToolbar"),
   selectionCount: document.getElementById("selectionCount"),
   selectPageBtn: document.getElementById("selectPageBtn"),
@@ -91,11 +136,7 @@ function safeNumber(value, fallback, min = 0, max = Infinity) {
   return Math.max(min, Math.min(max, n));
 }
 
-function getPaperSize() {
-  let w = 210, h = 297;
-  if (state.orientation === "landscape") [w, h] = [h, w];
-  return { width: w, height: h };
-}
+function getPaperSize() { return resolvePaperSize(state); }
 
 function getAspectRatio(item) {
   if (item.originalWidth > 0 && item.originalHeight > 0) {
@@ -140,11 +181,11 @@ function sizeByEdge(item, edgeMode, edgeSize) {
 
 function fitLockedFromWidth(item, requestedWidth) {
   const ratio = getAspectRatio(item);
-  let width = safeNumber(requestedWidth, item.width, 5, 200);
+  let width = safeNumber(requestedWidth, item.width, 5, 500);
   let height = width / ratio;
 
-  if (height > 280) {
-    height = 280;
+  if (height > 700) {
+    height = 700;
     width = height * ratio;
   }
   if (height < 5) {
@@ -152,18 +193,18 @@ function fitLockedFromWidth(item, requestedWidth) {
     width = height * ratio;
   }
   return {
-    width: round2(Math.min(200, Math.max(5, width))),
-    height: round2(Math.min(280, Math.max(5, height)))
+    width: round2(Math.min(500, Math.max(5, width))),
+    height: round2(Math.min(700, Math.max(5, height)))
   };
 }
 
 function fitLockedFromHeight(item, requestedHeight) {
   const ratio = getAspectRatio(item);
-  let height = safeNumber(requestedHeight, item.height, 5, 280);
+  let height = safeNumber(requestedHeight, item.height, 5, 700);
   let width = height * ratio;
 
-  if (width > 200) {
-    width = 200;
+  if (width > 500) {
+    width = 500;
     height = width / ratio;
   }
   if (width < 5) {
@@ -171,8 +212,8 @@ function fitLockedFromHeight(item, requestedHeight) {
     height = width / ratio;
   }
   return {
-    width: round2(Math.min(200, Math.max(5, width))),
-    height: round2(Math.min(280, Math.max(5, height)))
+    width: round2(Math.min(500, Math.max(5, width))),
+    height: round2(Math.min(700, Math.max(5, height)))
   };
 }
 
@@ -409,7 +450,7 @@ function createAssetCard(item) {
 
   node.dataset.itemId = item.id;
   if (selectedAssetId === item.id) node.classList.add("asset-card-selected");
-  if (selectedItemIds.has(item.id)) node.classList.add("asset-card-multi-selected");
+  if (getSelectedSources().has(item.id)) node.classList.add("asset-card-multi-selected");
 
   img.src = item.thumbSrc || item.src;
   name.textContent = item.name;
@@ -432,7 +473,7 @@ function createAssetCard(item) {
       width.value = item.width;
       height.value = item.height;
     } else {
-      item.width = safeNumber(width.value, state.defaultWidth, 5, 200);
+      item.width = safeNumber(width.value, state.defaultWidth, 5, 500);
     }
     renderPreviewOnly();
   });
@@ -445,7 +486,7 @@ function createAssetCard(item) {
       width.value = item.width;
       height.value = item.height;
     } else {
-      item.height = safeNumber(height.value, state.defaultHeight, 5, 280);
+      item.height = safeNumber(height.value, state.defaultHeight, 5, 700);
     }
     renderPreviewOnly();
   });
@@ -468,27 +509,63 @@ function createAssetCard(item) {
   return node;
 }
 
-function deleteAssetById(itemId) {
-  const index = state.items.findIndex(item => item.id === itemId);
-  if (index < 0) return;
+function rememberUndo() {
+  undoStack.push(state.items.map(item => ({ ...item })));
+  if (undoStack.length > 10) undoStack.shift();
+  refs.undoToast?.classList.remove('hidden');
+}
 
-  state.items.splice(index, 1);
-
-  if (selectedAssetId === itemId) {
-    selectedAssetId = null;
-  }
-
-  selectedItemIds.delete(itemId);
-
-  // 当前页可能因为删除素材而消失，所以重新约束页码。
-  const { pages } = layoutPages();
-  if (currentPage >= pages.length) {
-    currentPage = Math.max(0, pages.length - 1);
-  }
-
+function undoDeletion() {
+  const previous = undoStack.pop();
+  if (!previous) return;
+  state.items = previous;
+  selectedItemIds.clear();
+  selectedAssetId = null;
+  if (!undoStack.length) refs.undoToast?.classList.add('hidden');
   render();
   updateSelectionUI();
 }
+
+function deleteAssetById(itemId) {
+  const index = state.items.findIndex(item => item.id === itemId);
+  if (index < 0) return;
+  rememberUndo();
+  state.items.splice(index, 1);
+  if (selectedAssetId === itemId) selectedAssetId = null;
+  selectedItemIds.clear();
+  render();
+  updateSelectionUI();
+}
+
+function deleteSelectedCopies() {
+  if (!selectedItemIds.size) return;
+  const result = removeSelectedCopies(state.items, selectedItemIds);
+  if (!result.removed) return;
+  rememberUndo();
+  state.items = result.items;
+  selectedItemIds.clear();
+  selectionAnchorIndex = null;
+  selectedAssetId = null;
+  refs.assetSpotlight?.classList.add('hidden');
+  render();
+  updateSelectionUI();
+}
+
+refs.deleteSelectedBtn?.addEventListener('click', deleteSelectedCopies);
+refs.undoBtn?.addEventListener('click', undoDeletion);
+document.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' &&
+      !(event.target instanceof HTMLElement && event.target.closest('input,textarea,[contenteditable]'))) {
+    if (!undoStack.length) return;
+    event.preventDefault();
+    undoDeletion();
+  }
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedItemIds.size &&
+      !(event.target instanceof HTMLElement && event.target.closest('input,textarea,[contenteditable]'))) {
+    event.preventDefault();
+    deleteSelectedCopies();
+  }
+});
 
 // 左侧素材列表使用事件委托处理删除。
 // stopPropagation 可确保点击“×”只执行删除，不会触发卡片选中/定位。
@@ -547,57 +624,61 @@ function setMobileMultiSelectMode(enabled) {
 }
 
 function getPreviewScale(paper) {
-  if (!isMobileLayout()) return MM_TO_PX;
+  const measuredWidth = refs.previewArea?.clientWidth || window.innerWidth;
+  const availableWidth = Math.max(160, measuredWidth - (isMobileLayout() ? 28 : 64));
+  return Math.max(0.4, Math.min(MM_TO_PX, availableWidth / paper.width));
+}
 
-  const areaWidth = refs.previewArea?.clientWidth || window.innerWidth;
-  const availableWidth = Math.max(250, areaWidth - 18);
-  return Math.min(MM_TO_PX, availableWidth / paper.width);
+function showAssetSpotlight(itemId) {
+  if (!isMobileLayout()) return;
+  const item = state.items.find(x => x.id === itemId);
+  if (!item || !refs.assetSpotlight) return;
+  refs.assetSpotlightImg.src = item.thumbSrc || item.src;
+  refs.assetSpotlightName.textContent = item.name;
+  refs.assetSpotlightQty.textContent = `素材数量：${item.qty} · 点“查看素材”可修改`;
+  refs.assetSpotlight.dataset.itemId = item.id;
+  refs.assetSpotlight.classList.remove('hidden');
+  clearTimeout(assetSpotlightTimer);
+  assetSpotlightTimer = setTimeout(() => refs.assetSpotlight?.classList.add('hidden'), 6500);
 }
 
 function focusAssetCard(itemId) {
   selectedAssetId = itemId;
-
-  const revealTarget = () => {
-    document.querySelectorAll(".asset-card-selected").forEach(card => {
-      card.classList.remove("asset-card-selected");
-    });
-
-    const cards = [...refs.assetList.querySelectorAll(".asset-card")];
-    const target = cards.find(card => card.dataset.itemId === itemId);
-    if (!target) return;
-
-    target.classList.add("asset-card-selected");
-    target.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-      inline: "nearest"
-    });
-
-    target.classList.remove("asset-card-flash");
+  refs.assetList.querySelectorAll('.asset-card-selected').forEach(card => card.classList.remove('asset-card-selected'));
+  const target = [...refs.assetList.querySelectorAll('.asset-card')].find(card => card.dataset.itemId === itemId);
+  if (target) {
+    target.classList.add('asset-card-selected');
+    // Only the asset list scrolls; no scrollIntoView that would move the entire page.
+    if (!isMobileLayout()) scrollInside(refs.assetList, target);
+    target.classList.remove('asset-card-flash');
     void target.offsetWidth;
-    target.classList.add("asset-card-flash");
-    window.setTimeout(() => target.classList.remove("asset-card-flash"), 900);
-  };
-
-  if (isMobileLayout() && !mobileMultiSelectMode) {
-    setMobileView("assets", { skipRender: true });
-    requestAnimationFrame(() => requestAnimationFrame(revealTarget));
-  } else {
-    revealTarget();
+    target.classList.add('asset-card-flash');
   }
+  showAssetSpotlight(itemId);
 }
+
+refs.assetSpotlightClose?.addEventListener('click', () => refs.assetSpotlight.classList.add('hidden'));
+refs.assetSpotlightOpen?.addEventListener('click', () => {
+  const id = refs.assetSpotlight.dataset.itemId;
+  refs.assetSpotlight.classList.add('hidden');
+  setMobileView('assets', { skipRender: true });
+  requestAnimationFrame(() => {
+    const card = [...refs.assetList.querySelectorAll('.asset-card')].find(node => node.dataset.itemId === id);
+    if (card) scrollInside(refs.assetList, card);
+  });
+});
 
 function updateSelectionUI() {
   const count = selectedItemIds.size;
   refs.selectionCount.textContent = count;
-  refs.selectionToolbar.classList.toggle("hidden", count === 0);
-
-  document.querySelectorAll(".sticker[data-item-id]").forEach(sticker => {
-    sticker.classList.toggle("sticker-selected", selectedItemIds.has(sticker.dataset.itemId));
+  refs.selectionToolbar.classList.toggle('hidden', count === 0);
+  refs.deleteSelectedBtn?.classList.toggle('hidden', count === 0);
+  document.querySelectorAll('.sticker[data-instance-id]').forEach(sticker => {
+    sticker.classList.toggle('sticker-selected', selectedItemIds.has(sticker.dataset.instanceId));
   });
-
-  refs.assetList.querySelectorAll(".asset-card[data-item-id]").forEach(card => {
-    card.classList.toggle("asset-card-multi-selected", selectedItemIds.has(card.dataset.itemId));
+  const selectedAssets = getSelectedSources();
+  refs.assetList.querySelectorAll('.asset-card[data-item-id]').forEach(card => {
+    card.classList.toggle('asset-card-multi-selected', selectedAssets.has(card.dataset.itemId));
   });
 }
 
@@ -609,54 +690,46 @@ function clearPreviewSelection() {
 
 function selectCurrentPage() {
   const placements = lastLayout[currentPage] || [];
-  placements.forEach(p => selectedItemIds.add(p.id));
-  selectionAnchorIndex = placements.length ? placements.length - 1 : null;
+  placements.forEach(p => selectedItemIds.add(p.instanceId));
+  selectionAnchorIndex = placements.length ? lastLayout.slice(0, currentPage).flat().length + placements.length - 1 : null;
   updateSelectionUI();
 }
 
-function handleStickerSelection(event, itemId, placementIndex) {
+function handleStickerSelection(event, placement, placementIndex) {
+  const instanceId = placement.instanceId;
   const mobileAdditive = isMobileLayout() && mobileMultiSelectMode;
-  const additive = event.ctrlKey || event.metaKey || mobileAdditive;
+  const additive = !!(event.ctrlKey || event.metaKey || mobileAdditive);
   const range = !isMobileLayout() && event.shiftKey && selectionAnchorIndex != null;
-  const placements = lastLayout[currentPage] || [];
-
+  const placements = lastLayout.flat();
   if (range) {
     if (!additive) selectedItemIds.clear();
-    const start = Math.min(selectionAnchorIndex, placementIndex);
-    const end = Math.max(selectionAnchorIndex, placementIndex);
-    for (let i = start; i <= end; i++) {
-      if (placements[i]) selectedItemIds.add(placements[i].id);
+    for (let i = Math.min(selectionAnchorIndex, placementIndex); i <= Math.max(selectionAnchorIndex, placementIndex); i++) {
+      if (placements[i]) selectedItemIds.add(placements[i].instanceId);
     }
   } else if (additive) {
-    if (selectedItemIds.has(itemId)) {
-      selectedItemIds.delete(itemId);
-    } else {
-      selectedItemIds.add(itemId);
-    }
+    if (selectedItemIds.has(instanceId)) selectedItemIds.delete(instanceId);
+    else selectedItemIds.add(instanceId);
     selectionAnchorIndex = placementIndex;
   } else {
-    if (selectedItemIds.size === 1 && selectedItemIds.has(itemId)) {
+    if (selectedItemIds.size === 1 && selectedItemIds.has(instanceId)) {
       selectedItemIds.clear();
       selectionAnchorIndex = null;
     } else {
       selectedItemIds.clear();
-      selectedItemIds.add(itemId);
+      selectedItemIds.add(instanceId);
       selectionAnchorIndex = placementIndex;
     }
   }
-
-  if (selectedItemIds.has(itemId)) {
-    focusAssetCard(itemId);
-  }
+  if (selectedItemIds.has(instanceId)) focusAssetCard(placement.id);
   updateSelectionUI();
 }
 
 function applyLongEdgeToSelection(sizeMm) {
-  const size = safeNumber(sizeMm, 50, 5, 280);
+  const size = safeNumber(sizeMm, 50, 5, 700);
   if (!selectedItemIds.size) return;
 
   state.items.forEach(item => {
-    if (!selectedItemIds.has(item.id)) return;
+    if (!getSelectedSources().has(item.id)) return;
     const next = sizeByEdge(item, "long", size);
     item.width = next.width;
     item.height = next.height;
@@ -672,13 +745,13 @@ function scaleSelection(factor) {
   if (!selectedItemIds.size) return;
 
   state.items.forEach(item => {
-    if (!selectedItemIds.has(item.id)) return;
+    if (!getSelectedSources().has(item.id)) return;
 
     let applied = Number(factor);
     if (!Number.isFinite(applied) || applied <= 0) return;
 
     if (applied >= 1) {
-      applied = Math.min(applied, 200 / item.width, 280 / item.height);
+      applied = Math.min(applied, 500 / item.width, 700 / item.height);
     } else {
       applied = Math.max(applied, 5 / item.width, 5 / item.height);
     }
@@ -699,10 +772,12 @@ function adjustSelectionQuantity(delta) {
   if (!Number.isFinite(amount) || amount === 0) return;
 
   state.items.forEach(item => {
-    if (!selectedItemIds.has(item.id)) return;
+    if (!getSelectedSources().has(item.id)) return;
     item.qty = Math.max(1, Math.min(999, Math.floor((item.qty || 1) + amount)));
   });
 
+  const valid = new Set(expandItems().map(item => item.instanceId));
+  for (const id of selectedItemIds) if (!valid.has(id)) selectedItemIds.delete(id);
   renderAssets();
   renderPreviewOnly();
   updateSelectionUI();
@@ -716,190 +791,135 @@ function renderAssets() {
   }
 }
 
-function expandItems() {
-  const expanded = [];
-
-  for (const item of state.items) {
-    for (let i = 0; i < item.qty; i++) {
-      expanded.push({
-        ...item,
-        instanceId: `${item.id}-${i + 1}`
-      });
-    }
-  }
-
-  if (state.layoutMode === "compact") {
-    expanded.sort((a, b) =>
-      (b.height * b.width) - (a.height * a.width) ||
-      b.height - a.height
-    );
-  }
-
-  return expanded;
-}
-
-function layoutPages() {
-  const paper = getPaperSize();
-  const margin = state.margin;
-  const gap = state.gap;
-  const usableW = paper.width - margin * 2;
-  const usableH = paper.height - margin * 2;
-
-  const tooLarge = [];
-  const items = expandItems().filter(item => {
-    const ok = item.width <= usableW && item.height <= usableH;
-    if (!ok) tooLarge.push(item);
-    return ok;
-  });
-
-  const pages = [];
-  let page = [];
-  let x = margin;
-  let y = margin;
-  let rowH = 0;
-
-  const pushPage = () => {
-    if (page.length) pages.push(page);
-    page = [];
-    x = margin;
-    y = margin;
-    rowH = 0;
-  };
-
-  for (const item of items) {
-    if (x + item.width > paper.width - margin + 0.0001) {
-      x = margin;
-      y += rowH + gap;
-      rowH = 0;
-    }
-
-    if (y + item.height > paper.height - margin + 0.0001) {
-      pushPage();
-    }
-
-    if (x + item.width > paper.width - margin + 0.0001) {
-      tooLarge.push(item);
-      continue;
-    }
-
-    page.push({ ...item, x, y });
-
-    x += item.width + gap;
-    rowH = Math.max(rowH, item.height);
-  }
-
-  pushPage();
-  return { pages, tooLarge };
-}
-
-function addCutMarks(sticker, scale) {
-  const positions = [
-    [-5, -5],
-    [sticker.offsetWidth - 5, -5],
-    [-5, sticker.offsetHeight - 5],
-    [sticker.offsetWidth - 5, sticker.offsetHeight - 5]
-  ];
-
-  positions.forEach(([left, top]) => {
-    const mark = document.createElement("span");
-    mark.className = "cutmark";
-    mark.style.left = `${left}px`;
-    mark.style.top = `${top}px`;
-    mark.style.transform = `scale(${Math.min(1, scale / 2.5)})`;
-    sticker.appendChild(mark);
-  });
-}
+function expandItems() { return expandItemsFromState(state.items, state.layoutMode); }
+function layoutPages() { return calculateLayout(state, getPaperSize()); }
+function getSelectedSources() { return selectedSourceIds(lastLayout.flat(), selectedItemIds); }
 
 function updatePageNav(pages) {
   const count = pages.length;
-  if (currentPage >= count) currentPage = Math.max(0, count - 1);
-  refs.pageNav.classList.toggle("hidden", count <= 1);
-  refs.pageSelect.innerHTML = "";
-  for (let i = 0; i < count; i++) {
-    const option = document.createElement("option");
-    option.value = i;
-    option.textContent = `第 ${i + 1} / ${count} 页`;
-    refs.pageSelect.appendChild(option);
+  currentPage = Math.min(currentPage, Math.max(0, count - 1));
+  refs.pageNav.classList.toggle('hidden', count <= 1);
+  if (refs.pageSelect.options.length !== count) {
+    refs.pageSelect.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+      const option = document.createElement('option');
+      option.value = i;
+      option.textContent = `第 ${i + 1} / ${count} 页`;
+      refs.pageSelect.appendChild(option);
+    }
   }
-  refs.pageSelect.value = currentPage;
+  refs.pageSelect.value = String(currentPage);
   refs.prevPageBtn.disabled = currentPage <= 0;
   refs.nextPageBtn.disabled = currentPage >= count - 1;
 }
 
+function getVisiblePageIndex() {
+  const rect = refs.previewArea.getBoundingClientRect();
+  const wraps = [...refs.previewArea.querySelectorAll('.page-wrap')];
+  let nearest = 0;
+  let score = Infinity;
+  wraps.forEach((wrap, i) => {
+    const r = wrap.getBoundingClientRect();
+    const dist = Math.abs(r.top - rect.top - 20);
+    if (dist < score) { nearest = i; score = dist; }
+  });
+  return nearest;
+}
+
+function scrollToPreviewPage(index, behavior = 'smooth') {
+  if (!lastLayout.length) return;
+  currentPage = Math.max(0, Math.min(lastLayout.length - 1, index));
+  const wrap = refs.previewArea.querySelector(`.page-wrap[data-page-index="${currentPage}"]`);
+  if (wrap) {
+    const r = wrap.getBoundingClientRect();
+    const c = refs.previewArea.getBoundingClientRect();
+    refs.previewArea.scrollTo({ top: Math.max(0, refs.previewArea.scrollTop + r.top - c.top - 12), behavior });
+  }
+  updatePageNav(lastLayout);
+}
+
+refs.previewArea.addEventListener('scroll', () => {
+  if (scrollRequest) return;
+  scrollRequest = requestAnimationFrame(() => {
+    scrollRequest = 0;
+    if (!lastLayout.length) return;
+    const index = getVisiblePageIndex();
+    if (index !== currentPage) { currentPage = index; updatePageNav(lastLayout); }
+  });
+}, { passive: true });
+
 function renderPreviewOnly() {
-  const { pages, tooLarge } = layoutPages();
+  const preview = refs.previewArea;
+  const previousScroll = preview.scrollTop;
+  const previousCurrent = currentPage;
+  const previousWrap = preview.querySelector(`.page-wrap[data-page-index="${previousCurrent}"]`);
+  const oldDistance = previousWrap ? previousWrap.getBoundingClientRect().top - preview.getBoundingClientRect().top : 0;
+  const { pages, tooLarge, total } = layoutPages();
   lastLayout = pages;
-
-  refs.previewArea.innerHTML = "";
-  const total = expandItems().length;
+  if (pageObserver) { pageObserver.disconnect(); pageObserver = null; }
+  preview.innerHTML = '';
   refs.pageSummary.textContent = `${total} 张贴纸 · ${pages.length} 页 · ${state.items.length} 个图片文件`;
-  refs.layoutWarning.textContent = tooLarge.length
-    ? `有 ${tooLarge.length} 张尺寸超过当前纸张可用范围，未排入。`
-    : "";
-
+  refs.layoutWarning.textContent = tooLarge.length ? `有 ${tooLarge.length} 张超过可用范围，暂未排入。` : '';
+  refs.layoutIssuePanel?.classList.toggle('hidden', !tooLarge.length);
+  const issueText = refs.layoutIssuePanel?.querySelector('.issue-detail');
+  if (issueText && tooLarge.length) issueText.textContent = `有 ${tooLarge.length} 张贴纸无法放入 ${paperCaption(state)}。原图仍保留在素材库；可减小尺寸，或点击自动缩小。`;
+  const validIds = new Set(expandItems().map(p => p.instanceId));
+  for (const id of selectedItemIds) if (!validIds.has(id)) selectedItemIds.delete(id);
   updatePageNav(pages);
-
-  if (!state.items.length) {
-    refs.previewArea.innerHTML = `<div class="preview-placeholder">上传图片后，这里会显示当前 A4 页面。</div>`;
+  if (!state.items.length || !pages.length) {
+    preview.innerHTML = `<div class="preview-placeholder">${state.items.length ? '当前图片尺寸无法放入纸张，请减小贴纸尺寸或页边距。' : '还没有照片。先在“素材”中添加图片，随后会在这里连续显示每一页。'}</div>`;
+    updatePaperSummary();
     return;
   }
-
-  if (!pages.length) {
-    refs.previewArea.innerHTML = `<div class="preview-placeholder">当前图片尺寸无法放入纸张，请减小贴纸尺寸或页边距。</div>`;
-    return;
-  }
-
   const paper = getPaperSize();
   const scale = getPreviewScale(paper);
-  const placements = pages[currentPage];
-
-  const wrap = document.createElement("div");
-  wrap.className = "page-wrap";
-
-  const label = document.createElement("div");
-  label.className = "page-label";
-  label.textContent = `第 ${currentPage + 1} / ${pages.length} 页 · 本页 ${placements.length} 张`;
-
-  const page = document.createElement("div");
-  page.className = "paper";
-  page.style.width = `${paper.width * scale}px`;
-  page.style.height = `${paper.height * scale}px`;
-
-  placements.forEach((p, placementIndex) => {
-    const sticker = document.createElement("div");
-    sticker.className = `sticker ${state.showBorder ? "border-on" : ""} ${selectedItemIds.has(p.id) ? "sticker-selected" : ""}`;
-    sticker.style.left = `${p.x * scale}px`;
-    sticker.style.top = `${p.y * scale}px`;
-    sticker.style.width = `${p.width * scale}px`;
-    sticker.style.height = `${p.height * scale}px`;
-    sticker.dataset.itemId = p.id;
-    sticker.title = `点击选择并定位素材：${p.name}`;
-    sticker.tabIndex = 0;
-    sticker.setAttribute("role", "button");
-    sticker.setAttribute("aria-label", `定位到素材 ${p.name}`);
-
-    const activateSticker = event => handleStickerSelection(event, p.id, placementIndex);
-    sticker.addEventListener("click", activateSticker);
-    sticker.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        handleStickerSelection(event, p.id, placementIndex);
-      }
-    });
-
-    const img = document.createElement("img");
-    img.src = p.src;
-    img.alt = p.name;
-    img.loading = "lazy";
-    img.style.objectFit = state.fitMode;
-    sticker.appendChild(img);
-
-    if (state.showCutMarks) addCutMarks(sticker, scale);
-    page.appendChild(sticker);
+  let offset = 0;
+  const populate = (wrap, placements, pageIndex, firstIndex) => populatePageShell(wrap, placements, {
+    scale,
+    selected: selectedItemIds,
+    showBorder: state.showBorder,
+    showCutMarks: state.showCutMarks,
+    fitMode: state.fitMode,
+    onSelect: (e, p, i) => handleStickerSelection(e, p, firstIndex + i)
   });
-
-  wrap.append(label, page);
-  refs.previewArea.appendChild(wrap);
+  const lazyShells = [];
+  pages.forEach((placements, pageIndex) => {
+    const wrap = createPageShell(paper, scale, pageIndex, pages.length, placements.length);
+    preview.appendChild(wrap);
+    lazyShells.push({wrap,placements,pageIndex,firstIndex:offset});
+    offset += placements.length;
+  });
+  if ('IntersectionObserver' in window) {
+    const entryMap = new WeakMap(lazyShells.map(x => [x.wrap, x]));
+    pageObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const x = entryMap.get(entry.target);
+        if (!x) return;
+        populate(x.wrap,x.placements,x.pageIndex,x.firstIndex);
+        pageObserver?.unobserve(x.wrap);
+      });
+    }, { root: preview, rootMargin: '650px 0px' });
+    lazyShells.forEach(x => pageObserver.observe(x.wrap));
+    // Render current page immediately, without waiting for asynchronous IO callbacks.
+    if (lazyShells[currentPage]) {
+      const x = lazyShells[currentPage];
+      populate(x.wrap,x.placements,x.pageIndex,x.firstIndex);
+    }
+  } else {
+    lazyShells.forEach(x => populate(x.wrap,x.placements,x.pageIndex,x.firstIndex));
+  }
+  updatePaperSummary();
+  requestAnimationFrame(() => {
+    const next = preview.querySelector(`.page-wrap[data-page-index="${Math.min(previousCurrent,pages.length-1)}"]`);
+    if (next && previousWrap) {
+      const wanted = preview.scrollTop + next.getBoundingClientRect().top - preview.getBoundingClientRect().top - oldDistance;
+      preview.scrollTop = Math.max(0, wanted);
+    } else {
+      preview.scrollTop = Math.min(previousScroll, preview.scrollHeight - preview.clientHeight);
+    }
+    updateSelectionUI();
+  });
 }
 
 function render() {
@@ -928,21 +948,28 @@ function updateBatchSizingUI() {
 }
 
 function syncStateFromControls() {
+  state.paper = refs.paperSize.value;
+  state.customPaperWidth = safeNumber(refs.customPaperWidth.value, 210, 50, 500);
+  state.customPaperHeight = safeNumber(refs.customPaperHeight.value, 297, 50, 700);
   state.orientation = refs.orientation.value;
   state.margin = safeNumber(refs.marginInput.value, 8, 0, 30);
   state.gap = safeNumber(refs.gapInput.value, 3, 0, 30);
   state.layoutMode = refs.layoutMode.value;
-  state.defaultWidth = safeNumber(refs.defaultWidth.value, 50, 5, 200);
-  state.defaultHeight = safeNumber(refs.defaultHeight.value, 50, 5, 280);
+  state.defaultWidth = safeNumber(refs.defaultWidth.value, 50, 5, 500);
+  state.defaultHeight = safeNumber(refs.defaultHeight.value, 50, 5, 700);
   state.fitMode = refs.fitMode.value;
   state.showBorder = refs.showBorder.checked;
   state.showCutMarks = refs.showCutMarks.checked;
   state.preserveAspectOnImport = refs.preserveAspectOnImport.checked;
   state.batchSizingMode = refs.batchSizingMode.value;
-  state.edgeSize = safeNumber(refs.edgeSizeInput.value, 50, 5, 280);
+  state.edgeSize = safeNumber(refs.edgeSizeInput.value, 50, 5, 700);
 }
 
 function syncControlsFromState() {
+  refs.paperSize.value = PAPER_PRESETS.some(p => p.id === state.paper) ? state.paper : 'A4';
+  refs.customPaperWidth.value = state.customPaperWidth || 210;
+  refs.customPaperHeight.value = state.customPaperHeight || 297;
+  updatePaperCustomVisibility();
   refs.orientation.value = state.orientation;
   refs.marginInput.value = state.margin;
   refs.gapInput.value = state.gap;
@@ -959,6 +986,9 @@ function syncControlsFromState() {
 }
 
 [
+  "paperSize",
+  "customPaperWidth",
+  "customPaperHeight",
   "orientation",
   "marginInput",
   "gapInput",
@@ -973,6 +1003,7 @@ function syncControlsFromState() {
 ].forEach(key => {
   refs[key].addEventListener("input", () => {
     syncStateFromControls();
+    updatePaperCustomVisibility();
     if (key === "defaultWidth" || key === "defaultHeight") {
       document.querySelectorAll(".preset").forEach(btn => btn.classList.remove("active"));
     }
@@ -1102,26 +1133,9 @@ refs.applySizeToAllBtn.addEventListener("click", () => {
   render();
 });
 
-refs.pageSelect.addEventListener("change", () => {
-  currentPage = Number(refs.pageSelect.value);
-  selectionAnchorIndex = null;
-  renderPreviewOnly();
-  updateSelectionUI();
-});
-
-refs.prevPageBtn.addEventListener("click", () => {
-  if (currentPage > 0) currentPage--;
-  selectionAnchorIndex = null;
-  renderPreviewOnly();
-  updateSelectionUI();
-});
-
-refs.nextPageBtn.addEventListener("click", () => {
-  if (currentPage < lastLayout.length - 1) currentPage++;
-  selectionAnchorIndex = null;
-  renderPreviewOnly();
-  updateSelectionUI();
-});
+refs.pageSelect.addEventListener('change', () => scrollToPreviewPage(Number(refs.pageSelect.value)));
+refs.prevPageBtn.addEventListener('click', () => scrollToPreviewPage(currentPage - 1));
+refs.nextPageBtn.addEventListener('click', () => scrollToPreviewPage(currentPage + 1));
 
 refs.autoLayoutBtn.addEventListener("click", () => {
   syncStateFromControls();
@@ -1169,6 +1183,13 @@ function restoreSerialized(text) {
     throw new Error("项目文件格式不正确");
   }
 
+  if (!PAPER_PRESETS.some(p => p.id === incoming.paper)) incoming.paper = 'A4';
+  if (incoming.customPaperWidth == null) incoming.customPaperWidth = 210;
+  if (incoming.customPaperHeight == null) incoming.customPaperHeight = 297;
+  selectedItemIds.clear();
+  selectedAssetId = null;
+  undoStack.length = 0;
+  refs.undoToast?.classList.add('hidden');
   if (incoming.fitMode == null) incoming.fitMode = "contain";
   if (incoming.preserveAspectOnImport == null) incoming.preserveAspectOnImport = true;
   if (incoming.batchSizingMode == null) incoming.batchSizingMode = "box";
@@ -1235,14 +1256,27 @@ refs.loadProjectBtn.addEventListener("click", () =>
   loadRecentProject().catch(err => alert("恢复失败：" + err.message))
 );
 
-refs.exportProjectBtn.addEventListener("click", () => {
-  const blob = new Blob([serializeState()], { type: "application/json" });
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `贴纸排版项目_${new Date().toISOString().slice(0, 10)}.stickerproj`;
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
-});
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function exportProjectFile() {
+  const blob = new Blob([serializeState()], { type: "application/json" });
+  downloadBlob(
+    blob,
+    `贴纸排版项目_${new Date().toISOString().slice(0, 10)}.stickerproj`
+  );
+}
+
+refs.exportProjectBtn.addEventListener("click", exportProjectFile);
 
 refs.importProjectBtn.addEventListener("click", () => refs.projectFileInput.click());
 
@@ -1304,7 +1338,7 @@ function buildPrintHTML() {
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>A4 贴纸打印</title>
+<title>贴纸打印</title>
 <style>
   @page { size: ${pageCss}; margin: 0; }
   * { box-sizing: border-box; }
@@ -1359,7 +1393,7 @@ ${pagesHtml}
 </html>`;
 }
 
-refs.printBtn.addEventListener("click", () => {
+function openPrintDialog() {
   syncStateFromControls();
 
   try {
@@ -1378,7 +1412,43 @@ refs.printBtn.addEventListener("click", () => {
       alert(err.message);
     }
   }
-});
+}
+
+refs.printBtn.addEventListener("click", openPrintDialog);
+
+function setExportSheetStatus(message = "", visible = true) {
+  if (!refs.exportSheetStatus) return;
+  refs.exportSheetStatus.textContent = message;
+  refs.exportSheetStatus.classList.toggle("hidden", !visible);
+}
+
+async function exportPdfFile() {
+  const buttons = [refs.exportPdfBtn, refs.sheetExportPdfBtn].filter(Boolean);
+  buttons.forEach(button => button.disabled = true);
+  setExportSheetStatus("正在准备 PDF…", true);
+
+  try {
+    syncStateFromControls();
+    const { pages, tooLarge } = layoutPages();
+    const blob = await buildPdfBlob({ state, pages, tooLarge, paper: getPaperSize(), onProgress: message => setExportSheetStatus(message, true) });
+    const date = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `贴纸排版_${date}.pdf`);
+    setExportSheetStatus("PDF 已生成并开始下载。", true);
+    window.setTimeout(() => {
+      closeExportSheet();
+      setExportSheetStatus("", false);
+    }, 650);
+  } catch (err) {
+    if (err.message !== "已取消导出。") {
+      setExportSheetStatus(err.message || "PDF 导出失败。", true);
+      alert(err.message || "PDF 导出失败。");
+    }
+  } finally {
+    buttons.forEach(button => button.disabled = false);
+  }
+}
+
+refs.exportPdfBtn?.addEventListener("click", exportPdfFile);
 
 refs.selectPageBtn.addEventListener("click", selectCurrentPage);
 refs.clearSelectionBtn.addEventListener("click", clearPreviewSelection);
@@ -1407,6 +1477,65 @@ document.querySelectorAll(".scale-selected-btn").forEach(button => {
   button.addEventListener("click", () => scaleSelection(button.dataset.scale));
 });
 
+function openExportSheet() {
+  if (!refs.exportSheetBackdrop) return;
+  refs.exportSheetBackdrop.classList.remove("hidden");
+  refs.exportSheetBackdrop.setAttribute("aria-hidden", "false");
+  document.body.classList.add("export-sheet-open");
+  setExportSheetStatus("", false);
+  window.setTimeout(() => refs.sheetExportPdfBtn?.focus(), 0);
+}
+
+function closeExportSheet() {
+  if (!refs.exportSheetBackdrop) return;
+  refs.exportSheetBackdrop.classList.add("hidden");
+  refs.exportSheetBackdrop.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("export-sheet-open");
+}
+
+refs.mobileExportFab?.addEventListener("click", openExportSheet);
+refs.closeExportSheetBtn?.addEventListener("click", closeExportSheet);
+refs.cancelExportSheetBtn?.addEventListener("click", closeExportSheet);
+refs.exportSheetBackdrop?.addEventListener("click", event => {
+  if (event.target === refs.exportSheetBackdrop) closeExportSheet();
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !refs.exportSheetBackdrop?.classList.contains("hidden")) {
+    closeExportSheet();
+  }
+});
+
+refs.sheetExportPdfBtn?.addEventListener("click", exportPdfFile);
+refs.sheetPrintBtn?.addEventListener("click", () => {
+  closeExportSheet();
+  openPrintDialog();
+});
+refs.sheetSaveProjectBtn?.addEventListener("click", async () => {
+  try {
+    await saveRecentProject();
+    closeExportSheet();
+  } catch (err) {
+    alert("保存失败：" + err.message);
+  }
+});
+refs.sheetLoadProjectBtn?.addEventListener("click", async () => {
+  try {
+    await loadRecentProject();
+    closeExportSheet();
+  } catch (err) {
+    alert("恢复失败：" + err.message);
+  }
+});
+refs.sheetExportProjectBtn?.addEventListener("click", () => {
+  exportProjectFile();
+  closeExportSheet();
+});
+refs.sheetImportProjectBtn?.addEventListener("click", () => {
+  closeExportSheet();
+  refs.projectFileInput.click();
+});
+
 if (refs.mobileNav) {
   refs.mobileNav.addEventListener("click", event => {
     const button = event.target.closest(".mobile-nav-btn");
@@ -1420,6 +1549,107 @@ if (refs.mobileMultiSelectBtn) {
     setMobileMultiSelectMode(!mobileMultiSelectMode);
   });
 }
+
+function updatePaperCustomVisibility() {
+  refs.customPaperFields?.classList.toggle('hidden', refs.paperSize.value !== 'custom');
+}
+
+function updatePaperSummary() {
+  if (refs.paperQuickBtn) refs.paperQuickBtn.textContent = `▤ ${paperCaption(state)} ▾`;
+  if (refs.paperSheetSize) refs.paperSheetSize.textContent = paperCaption(state);
+  refs.paperSheetChoices?.querySelectorAll('[data-paper]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.paper === state.paper);
+    btn.setAttribute('aria-pressed', String(btn.dataset.paper === state.paper));
+  });
+  refs.paperSheetOrientation?.querySelectorAll('[data-orientation]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.orientation === state.orientation);
+  });
+}
+
+function setPaperChoice(choice) {
+  state.paper = choice;
+  syncControlsFromState();
+  renderPreviewOnly();
+}
+
+function openPaperSheet() {
+  refs.paperSheetBackdrop?.classList.remove('hidden');
+  refs.paperSheetBackdrop?.setAttribute('aria-hidden','false');
+  updatePaperSummary();
+}
+function closePaperSheet() {
+  refs.paperSheetBackdrop?.classList.add('hidden');
+  refs.paperSheetBackdrop?.setAttribute('aria-hidden','true');
+}
+
+function initPaperPicker() {
+  refs.paperSize.innerHTML = '';
+  for (const preset of PAPER_PRESETS) {
+    const option = document.createElement('option');
+    option.value = preset.id;
+    option.textContent = `${preset.label} · ${preset.id === 'custom' ? '输入尺寸' : `${preset.width} × ${preset.height} mm`}`;
+    refs.paperSize.appendChild(option);
+  }
+  refs.paperSheetChoices.innerHTML = '';
+  for (const category of ['办公用纸','照片相纸','自定义']) {
+    const group = document.createElement('div');
+    group.className = 'paper-choice-group';
+    const title = document.createElement('p');
+    title.textContent = category;
+    group.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'paper-choice-grid';
+    PAPER_PRESETS.filter(p => p.category === category).forEach(preset => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'paper-choice';
+      button.dataset.paper = preset.id;
+      button.textContent = preset.label;
+      button.title = `${preset.width} × ${preset.height} mm`;
+      button.addEventListener('click', () => {
+        setPaperChoice(preset.id);
+        if (preset.id === 'custom') {
+          closePaperSheet();
+          if (isMobileLayout()) setMobileView('settings');
+          refs.customPaperWidth.focus();
+        } else closePaperSheet();
+      });
+      grid.appendChild(button);
+    });
+    group.appendChild(grid);
+    refs.paperSheetChoices.appendChild(group);
+  }
+  refs.paperQuickBtn?.addEventListener('click', openPaperSheet);
+  refs.closePaperSheetBtn?.addEventListener('click', closePaperSheet);
+  refs.paperSheetBackdrop?.addEventListener('click', e => { if (e.target === refs.paperSheetBackdrop) closePaperSheet(); });
+  refs.paperSheetOrientation?.addEventListener('click', e => {
+    const button = e.target.closest('[data-orientation]');
+    if (!button) return;
+    state.orientation = button.dataset.orientation;
+    syncControlsFromState();
+    renderPreviewOnly();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closePaperSheet(); });
+}
+
+refs.fitOversizeBtn?.addEventListener('click', () => {
+  const paper = getPaperSize();
+  const maxW = paper.width - 2 * state.margin;
+  const maxH = paper.height - 2 * state.margin;
+  if (maxW < 5 || maxH < 5) { alert('纸张可用范围不足，请先减小页边距。'); return; }
+  const ids = new Set(layoutPages().tooLarge.map(p => p.id));
+  if (!ids.size) return;
+  state.items.forEach(item => {
+    if (!ids.has(item.id)) return;
+    const scale = Math.min(1, maxW / item.width, maxH / item.height);
+    item.width = round2(item.width * scale);
+    item.height = round2(item.height * scale);
+  });
+  render();
+  updateSelectionUI();
+});
+
+initPaperPicker();
 
 window.addEventListener("resize", () => {
   if (isMobileLayout()) {

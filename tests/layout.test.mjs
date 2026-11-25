@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { resolvePaperSize, PAPER_PRESETS } from '../modules/paper.js';
+import { calculateLayout, removeSelectedCopies } from '../modules/layout.js';
+const img = (id, qty=1, width=50,height=50) => ({id,name:id,qty,width,height});
+const state={ paper:'A4',orientation:'portrait',margin:8,gap:3,layoutMode:'order', items:[img('a',22),img('b',1)]};
+assert.equal(resolvePaperSize(state).width,210);
+assert.equal(resolvePaperSize({...state,paper:'6R'}).width,102);
+assert.equal(resolvePaperSize({...state,paper:'6R',orientation:'landscape'}).width,152);
+assert.equal(resolvePaperSize({...state,paper:'custom',customPaperWidth:115,customPaperHeight:180}).width,115);
+let result=calculateLayout(state,resolvePaperSize(state));
+assert.equal(result.pages.flat().length,23);
+assert.equal(result.tooLarge.length,0);
+assert.ok(result.pages.length>1);
+for(const page of result.pages) for(const p of page){assert.ok(p.x>=8&&p.y>=8);assert.ok(p.x+p.width<=210-8+.001);assert.ok(p.y+p.height<=297-8+.001)}
+const small={...state,paper:'6R'};
+result=calculateLayout(small,resolvePaperSize(small));
+assert.equal(result.pages.flat().length,23);
+assert.ok(result.pages.length>2);
+result=calculateLayout({...small,items:[img('big',1,100,100)]},resolvePaperSize(small));
+assert.equal(result.tooLarge.length,1);
+assert.equal(result.pages.length,0);
+const removed=removeSelectedCopies([img('a',3),img('b',1)],new Set(['a-2','b-1']));
+assert.equal(removed.removed,2);
+assert.deepEqual(removed.items.map(x=>[x.id,x.qty]),[['a',2]]);
+const after=calculateLayout({...state,items:removed.items},resolvePaperSize(state));
+assert.equal(after.pages.flat().length,2);
+console.log('All paper/layout/delete/reflow tests passed.');

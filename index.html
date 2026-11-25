@@ -3,21 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>A4 贴纸自动排版器 V1.7</title>
+  <title>排版工作台 V1.9</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div>
       <div class="brand-kicker">STICKER WORKSPACE</div>
-      <h1>A4 贴纸排版器 <span class="version">V1.7</span></h1>
-      <p>保持原图比例，把照片轻松排进 A4。</p>
+      <h1>排版工作台 <span class="version">V1.9</span></h1>
+      <p>多种纸张 · 连续预览 · 自动补位。</p>
     </div>
     <div class="top-actions">
       <button id="saveProjectBtn" class="btn secondary">保存项目</button>
       <button id="exportProjectBtn" class="btn secondary">导出项目</button>
       <button id="importProjectBtn" class="btn secondary">导入项目</button>
-      <button id="printBtn" class="btn primary">打印 / 保存 PDF</button>
+      <button id="printBtn" class="btn secondary">打印</button>
+      <button id="exportPdfBtn" class="btn primary">导出 PDF</button>
       <input id="projectFileInput" type="file" accept=".stickerproj,.json" hidden />
     </div>
   </header>
@@ -37,7 +38,7 @@
           <button id="androidBatchBtn" type="button" class="btn secondary full compat-batch-btn">批量选图（兼容）</button>
         </div>
         <div id="mobilePhotoHint" class="mobile-photo-hint mobile-only">厂商浏览器的相册若只能单选，请使用“批量选图（兼容）”，优先调用支持多选的系统文件选择器。重复照片会自动跳过。</div>
-        <div class="duplicate-tip">同一张照片只导入一次；需要它在 A4 上出现多次，请调整该图片的“数量”。</div>
+        <div class="duplicate-tip">同一张照片只导入一次；需要它在纸张上出现多次，请调整该图片的“数量”。</div>
         <div id="importStatus" class="import-status hidden" aria-live="polite"></div>
         <div id="emptyHint" class="empty-hint">
           还没有图片。点击“添加图片”，可以批量选择照片。
@@ -52,6 +53,7 @@
           <strong id="pageSummary">0 张贴纸 · 0 页</strong>
           <span id="layoutWarning" class="warning"></span>
         </div>
+        <button id="paperQuickBtn" class="paper-quick-btn" type="button" aria-haspopup="dialog" aria-controls="paperSheet">▤ A4 · 纵向 · 210 × 297 mm ▾</button>
         <div id="pageNav" class="page-nav hidden">
           <button id="prevPageBtn" class="btn secondary small">上一页</button>
           <select id="pageSelect" aria-label="页码"></select>
@@ -66,12 +68,16 @@
 
       <div id="selectionToolbar" class="selection-toolbar hidden">
         <div class="selection-status">
-          已选 <strong id="selectionCount">0</strong> 个图片素材
+          已选 <strong id="selectionCount">0</strong> 张贴纸
         </div>
 
         <div class="selection-group">
           <button id="selectPageBtn" class="btn secondary small">全选本页</button>
           <button id="clearSelectionBtn" class="btn secondary small">取消选择</button>
+        </div>
+
+        <div class="selection-group selection-delete-group">
+          <button id="deleteSelectedBtn" class="btn small danger-btn" type="button">删除选中</button>
         </div>
 
         <div class="selection-group quantity-selection-group">
@@ -94,7 +100,7 @@
         <div class="selection-group custom-size-group">
           <label>
             <span>自定义长边</span>
-            <input id="selectedLongEdgeInput" type="number" min="5" max="280" step="0.5" value="50" />
+            <input id="selectedLongEdgeInput" type="number" min="5" max="700" step="0.5" value="50" />
           </label>
           <button id="applySelectedSizeBtn" class="btn secondary small">应用</button>
         </div>
@@ -106,14 +112,17 @@
         </div>
 
         <div class="selection-hint">
-          普通点击单选；Ctrl / ⌘ 点击追加；Shift 点击连续选择。需要同一照片多份时，选择后用“数量 +1”。
+          点击选中贴纸；Ctrl / ⌘ 追加、Shift 跨页连续选择。删除只移除选中的副本，左侧 × 删除该素材全部副本。
         </div>
       </div>
 
-      <div id="previewArea" class="preview-area">
-        <div class="preview-placeholder">
-          上传图片后，这里只显示当前 A4 页面；其他页通过页码切换。
-        </div>
+      <div id="layoutIssuePanel" class="layout-issue-panel hidden" role="status">
+        <span class="issue-detail">部分贴纸无法放入当前纸张。</span>
+        <button id="fitOversizeBtn" class="btn secondary small" type="button">自动缩小超出项</button>
+      </div>
+
+      <div id="previewArea" class="preview-area" role="region" aria-label="连续纸张预览，可独立滚动" tabindex="0">
+        <div class="preview-placeholder">添加照片后，纸张会在这里按顺序连续展示。</div>
       </div>
     </section>
 
@@ -127,6 +136,11 @@
             <option value="A4" selected>A4 · 210 × 297 mm</option>
           </select>
         </label>
+
+        <div id="customPaperFields" class="field two-cols hidden">
+          <label><span>纸张宽（mm）</span><input id="customPaperWidth" type="number" min="50" max="500" step="1" value="210" /></label>
+          <label><span>纸张高（mm）</span><input id="customPaperHeight" type="number" min="50" max="700" step="1" value="297" /></label>
+        </div>
 
         <label class="field">
           <span>方向</span>
@@ -170,11 +184,11 @@
         <div class="field two-cols">
           <label>
             <span>宽（mm）</span>
-            <input id="defaultWidth" type="number" min="5" max="200" step="0.5" value="50" />
+            <input id="defaultWidth" type="number" min="5" max="500" step="0.5" value="50" />
           </label>
           <label>
             <span>高（mm）</span>
-            <input id="defaultHeight" type="number" min="5" max="280" step="0.5" value="50" />
+            <input id="defaultHeight" type="number" min="5" max="700" step="0.5" value="50" />
           </label>
         </div>
 
@@ -198,7 +212,7 @@
 
         <label id="edgeSizeField" class="field hidden">
           <span id="edgeSizeLabel">长边尺寸（mm）</span>
-          <input id="edgeSizeInput" type="number" min="5" max="280" step="0.5" value="50" />
+          <input id="edgeSizeInput" type="number" min="5" max="700" step="0.5" value="50" />
         </label>
 
         <p id="batchSizingHint" class="helper-text">
@@ -232,10 +246,99 @@
 
       <section class="print-note">
         <h2>打印提醒</h2>
-        <p>请在系统打印窗口选择 <strong>100% / 实际大小</strong>，不要选择“适合页面”，否则实际尺寸可能被缩放。</p>
+        <p>导出 PDF 时使用当前纸张的实际毫米尺寸；连接打印机时请选择 <strong>100% / 实际大小</strong>，并确认打印机纸张与所选规格一致。</p>
       </section>
     </aside>
   </main>
+
+  <div id="undoToast" class="undo-toast hidden" role="status" aria-live="polite">
+    <span>已删除贴纸，后续内容已自动补位。</span>
+    <button id="undoBtn" type="button">撤销</button>
+  </div>
+
+  <aside id="assetSpotlight" class="asset-spotlight hidden" aria-live="polite">
+    <img id="assetSpotlightImg" alt="已选图片" />
+    <div class="asset-spotlight-copy"><strong id="assetSpotlightName"></strong><small id="assetSpotlightQty"></small></div>
+    <button id="assetSpotlightOpen" type="button">查看素材</button>
+    <button id="assetSpotlightClose" type="button" aria-label="关闭素材提示">×</button>
+  </aside>
+
+  <div id="paperSheetBackdrop" class="paper-sheet-backdrop hidden" aria-hidden="true">
+    <section id="paperSheet" class="paper-sheet" role="dialog" aria-modal="true" aria-labelledby="paperSheetTitle">
+      <div class="paper-sheet-heading">
+        <div><span class="paper-sheet-kicker">PAPER SIZE</span><h2 id="paperSheetTitle">选择纸张</h2></div>
+        <button id="closePaperSheetBtn" type="button" class="sheet-close-btn" aria-label="关闭纸张选择">×</button>
+      </div>
+      <p class="paper-sheet-intro">切换纸型后自动重排，不改变贴纸的实际尺寸或数量。</p>
+      <div id="paperSheetChoices"></div>
+      <div class="paper-sheet-orientation" id="paperSheetOrientation">
+        <span>纸张方向</span>
+        <button type="button" data-orientation="portrait" class="active">纵向</button>
+        <button type="button" data-orientation="landscape">横向</button>
+      </div>
+      <p id="paperSheetSize" class="paper-sheet-size">A4 · 210 × 297 mm</p>
+    </section>
+  </div>
+
+  <button id="mobileExportFab" class="mobile-export-fab" type="button" aria-haspopup="dialog" aria-controls="exportSheet">
+    <span class="mobile-export-fab-icon" aria-hidden="true">⇩</span>
+    <span>导出</span>
+  </button>
+
+  <div id="exportSheetBackdrop" class="export-sheet-backdrop hidden" aria-hidden="true">
+    <section id="exportSheet" class="export-sheet" role="dialog" aria-modal="true" aria-labelledby="exportSheetTitle">
+      <div class="export-sheet-handle" aria-hidden="true"></div>
+      <div class="export-sheet-head">
+        <div>
+          <div class="export-sheet-kicker">OUTPUT CENTER</div>
+          <h2 id="exportSheetTitle">导出与项目</h2>
+        </div>
+        <button id="closeExportSheetBtn" class="sheet-close-btn" type="button" aria-label="关闭导出面板">×</button>
+      </div>
+
+      <div id="exportSheetStatus" class="export-sheet-status hidden" aria-live="polite"></div>
+
+      <div class="export-sheet-section">
+        <div class="export-sheet-section-title">文件输出</div>
+        <button id="sheetExportPdfBtn" class="export-action export-action-primary" type="button">
+          <span class="export-action-icon">PDF</span>
+          <span class="export-action-copy"><strong>导出 PDF</strong><small>直接生成 PDF 文件并下载到设备</small></span>
+          <span class="export-action-chevron">›</span>
+        </button>
+        <button id="sheetPrintBtn" class="export-action" type="button">
+          <span class="export-action-icon">印</span>
+          <span class="export-action-copy"><strong>打印</strong><small>打开系统打印界面，连接打印机时使用</small></span>
+          <span class="export-action-chevron">›</span>
+        </button>
+      </div>
+
+      <div class="export-sheet-section">
+        <div class="export-sheet-section-title">项目文件</div>
+        <button id="sheetSaveProjectBtn" class="export-action" type="button">
+          <span class="export-action-icon">存</span>
+          <span class="export-action-copy"><strong>保存项目</strong><small>保存在当前浏览器，稍后继续编辑</small></span>
+          <span class="export-action-chevron">›</span>
+        </button>
+        <button id="sheetLoadProjectBtn" class="export-action" type="button">
+          <span class="export-action-icon">续</span>
+          <span class="export-action-copy"><strong>恢复最近保存</strong><small>读取当前浏览器里最近保存的项目</small></span>
+          <span class="export-action-chevron">›</span>
+        </button>
+        <button id="sheetExportProjectBtn" class="export-action" type="button">
+          <span class="export-action-icon">项</span>
+          <span class="export-action-copy"><strong>导出项目文件</strong><small>下载 .stickerproj，用于备份或换设备</small></span>
+          <span class="export-action-chevron">›</span>
+        </button>
+        <button id="sheetImportProjectBtn" class="export-action" type="button">
+          <span class="export-action-icon">入</span>
+          <span class="export-action-copy"><strong>导入项目</strong><small>从 .stickerproj 恢复已有排版</small></span>
+          <span class="export-action-chevron">›</span>
+        </button>
+      </div>
+
+      <button id="cancelExportSheetBtn" class="export-sheet-cancel" type="button">取消</button>
+    </section>
+  </div>
 
   <nav id="mobileNav" class="mobile-nav" aria-label="手机端页面导航">
     <button type="button" class="mobile-nav-btn" data-mobile-view="assets">
@@ -268,11 +371,11 @@
           </label>
           <label>
             <span>宽 mm</span>
-            <input class="width-input" type="number" min="5" max="200" step="0.5" />
+            <input class="width-input" type="number" min="5" max="500" step="0.5" />
           </label>
           <label>
             <span>高 mm</span>
-            <input class="height-input" type="number" min="5" max="280" step="0.5" />
+            <input class="height-input" type="number" min="5" max="700" step="0.5" />
           </label>
         </div>
 
@@ -284,6 +387,6 @@
     </article>
   </template>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
